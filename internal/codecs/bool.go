@@ -72,6 +72,9 @@ func (c *boolCodec) Encode(
 	case marshal.BoolMarshaler:
 		return c.encodeMarshaler(w, in, path)
 	default:
+		if v := reflect.ValueOf(val); v.Kind() == reflect.Bool {
+			return c.encodeData(w, v.Bool())
+		}
 		return fmt.Errorf("expected %v to be bool, edgedb.OptionalBool or "+
 			"BoolMarshaler got %T", path, val)
 	}

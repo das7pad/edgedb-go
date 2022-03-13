@@ -87,6 +87,9 @@ func (c *int16Codec) Encode(
 	case marshal.Int16Marshaler:
 		return encodeMarshaler(w, in, in.MarshalEdgeDBInt16, 2, path)
 	default:
+		if v := reflect.ValueOf(val); v.Kind() == reflect.Int16 {
+			return c.encodeData(w, int16(v.Int()))
+		}
 		return fmt.Errorf("expected %v to be int16, edgedb.OptionalInt16 or "+
 			"Int16Marshaler got %T", path, val)
 	}
@@ -164,6 +167,9 @@ func (c *int32Codec) Encode(
 	case marshal.Int32Marshaler:
 		return encodeMarshaler(w, in, in.MarshalEdgeDBInt32, 4, path)
 	default:
+		if v := reflect.ValueOf(val); v.Kind() == reflect.Int32 {
+			return c.encodeData(w, int32(v.Int()))
+		}
 		return fmt.Errorf("expected %v to be int32, edgedb.OptionalInt32 "+
 			"or Int32Marshaler got %T", path, val)
 	}
@@ -241,6 +247,9 @@ func (c *int64Codec) Encode(
 	case marshal.Int64Marshaler:
 		return encodeMarshaler(w, in, in.MarshalEdgeDBInt64, 8, path)
 	default:
+		if v := reflect.ValueOf(val); v.Kind() == reflect.Int64 {
+			return c.encodeData(w, v.Int())
+		}
 		return fmt.Errorf("expected %v to be int64, edgedb.OptionalInt64 or "+
 			"Int64Marshaler got %T", path, val)
 	}
@@ -318,6 +327,9 @@ func (c *float32Codec) Encode(
 	case marshal.Float32Marshaler:
 		return encodeMarshaler(w, in, in.MarshalEdgeDBFloat32, 4, path)
 	default:
+		if v := reflect.ValueOf(val); v.Kind() == reflect.Float32 {
+			return c.encodeData(w, float32(v.Float()))
+		}
 		return fmt.Errorf("expected %v to be float32, edgedb.OptionalFloat32 "+
 			"or Float32Marshaler got %T", path, val)
 	}
@@ -395,6 +407,9 @@ func (c *float64Codec) Encode(
 	case marshal.Float64Marshaler:
 		return encodeMarshaler(w, in, in.MarshalEdgeDBFloat64, 8, path)
 	default:
+		if v := reflect.ValueOf(val); v.Kind() == reflect.Float64 {
+			return c.encodeData(w, v.Float())
+		}
 		return fmt.Errorf("expected %v to be float64, edgedb.OptionalFloat64 "+
 			"or Float64Marshaler got %T", path, val)
 	}

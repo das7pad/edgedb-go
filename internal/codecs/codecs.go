@@ -233,6 +233,9 @@ func buildScalarDecoder(
 		case optionalStrType:
 			return &optionalStrDecoder{strID}, nil
 		default:
+			if typ.Kind() == reflect.String {
+				return &strCodec{strID}, nil
+			}
 			expectedType = "string or edgedb.OptionalStr"
 		}
 	case bytesID:
@@ -251,6 +254,9 @@ func buildScalarDecoder(
 		case optionalInt16Type:
 			return &optionalInt16Decoder{}, nil
 		default:
+			if typ.Kind() == reflect.Int16 {
+				return &int16Codec{}, nil
+			}
 			expectedType = "int16 or edgedb.OptionalInt16"
 		}
 	case int32ID:
@@ -260,6 +266,9 @@ func buildScalarDecoder(
 		case optionalInt32Type:
 			return &optionalInt32Decoder{}, nil
 		default:
+			if typ.Kind() == reflect.Int32 {
+				return &int32Codec{}, nil
+			}
 			expectedType = "int32 or edgedb.OptionalInt32"
 		}
 	case int64ID:
@@ -269,6 +278,9 @@ func buildScalarDecoder(
 		case optionalInt64Type:
 			return &optionalInt64Decoder{}, nil
 		default:
+			if typ.Kind() == reflect.Int64 {
+				return &int64Codec{}, nil
+			}
 			expectedType = "int64 or edgedb.OptionalInt64"
 		}
 	case float32ID:
@@ -278,6 +290,9 @@ func buildScalarDecoder(
 		case optionalFloat32Type:
 			return &optionalFloat32Decoder{}, nil
 		default:
+			if typ.Kind() == reflect.Float32 {
+				return &float32Codec{}, nil
+			}
 			expectedType = "float32 or edgedb.OptionalFloat32"
 		}
 	case float64ID:
@@ -287,6 +302,9 @@ func buildScalarDecoder(
 		case optionalFloat64Type:
 			return &optionalFloat64Decoder{}, nil
 		default:
+			if typ.Kind() == reflect.Float64 {
+				return &float64Codec{}, nil
+			}
 			expectedType = "float64 or edgedb.OptionalFloat64"
 		}
 	case decimalID:
@@ -300,6 +318,9 @@ func buildScalarDecoder(
 		case optionalBoolType:
 			return &optionalBoolDecoder{}, nil
 		default:
+			if typ.Kind() == reflect.Bool {
+				return &boolCodec{}, nil
+			}
 			expectedType = "bool or edgedb.OptionalBool"
 		}
 	case dateTimeID:

@@ -75,6 +75,9 @@ func (c *strCodec) Encode(
 	case marshal.StrMarshaler:
 		return c.encodeMarshaler(w, in, path)
 	default:
+		if v := reflect.ValueOf(val); v.Kind() == reflect.String {
+			return c.encodeData(w, v.String())
+		}
 		return fmt.Errorf("expected %v to be string, edgedb.OptionalStr "+
 			"or StrMarshaler got %T", path, val)
 	}
