@@ -22,6 +22,7 @@ import (
 )
 
 // TxBlock is work to be done in a transaction.
+// Passing the context.Context argument to a Client call will resume the Tx.
 type TxBlock func(context.Context, *Tx) error
 
 type txStatus int

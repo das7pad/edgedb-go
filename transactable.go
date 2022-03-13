@@ -22,6 +22,15 @@ import (
 	"time"
 )
 
+type txContextKey struct{}
+
+// TxFromContext returns the last Tx from the context chain, if any.
+// The context.Context argument from a TxBlock will have one stored.
+func TxFromContext(ctx context.Context) (*Tx, bool) {
+	tx, ok := ctx.Value(txContextKey{}).(*Tx)
+	return tx, ok
+}
+
 type transactableConn struct {
 	*reconnectingConn
 	txOpts    TxOptions
@@ -159,7 +168,7 @@ func (c *transactableConn) Tx(
 				goto Error
 			}
 
-			err = action(ctx, tx)
+			err = action(context.WithValue(ctx, txContextKey{}, tx), tx)
 			if err == nil {
 				err = tx.commit(ctx)
 				if errors.As(err, &edbErr) &&

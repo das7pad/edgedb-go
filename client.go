@@ -359,6 +359,13 @@ func (p *Client) Close() error {
 
 // Execute an EdgeQL command (or commands).
 func (p *Client) Execute(ctx context.Context, cmd string) error {
+	if tx, hasTx := TxFromContext(ctx); hasTx {
+		if subTx, hasSubtx := SubtxFromContext(ctx); hasSubtx {
+			return subTx.Execute(ctx, cmd)
+		}
+		return tx.Execute(ctx, cmd)
+	}
+
 	conn, err := p.acquire(ctx)
 	if err != nil {
 		return err
@@ -380,6 +387,13 @@ func (p *Client) Query(
 	out interface{},
 	args ...interface{},
 ) error {
+	if tx, hasTx := TxFromContext(ctx); hasTx {
+		if subTx, hasSubtx := SubtxFromContext(ctx); hasSubtx {
+			return subTx.Query(ctx, cmd, out, args...)
+		}
+		return tx.Query(ctx, cmd, out, args...)
+	}
+
 	conn, err := p.acquire(ctx)
 	if err != nil {
 		return err
@@ -398,6 +412,13 @@ func (p *Client) QuerySingle(
 	out interface{},
 	args ...interface{},
 ) error {
+	if tx, hasTx := TxFromContext(ctx); hasTx {
+		if subTx, hasSubtx := SubtxFromContext(ctx); hasSubtx {
+			return subTx.QuerySingle(ctx, cmd, out, args...)
+		}
+		return tx.QuerySingle(ctx, cmd, out, args...)
+	}
+
 	conn, err := p.acquire(ctx)
 	if err != nil {
 		return err
@@ -414,6 +435,13 @@ func (p *Client) QueryJSON(
 	out *[]byte,
 	args ...interface{},
 ) error {
+	if tx, hasTx := TxFromContext(ctx); hasTx {
+		if subTx, hasSubtx := SubtxFromContext(ctx); hasSubtx {
+			return subTx.QueryJSON(ctx, cmd, out, args...)
+		}
+		return tx.QueryJSON(ctx, cmd, out, args...)
+	}
+
 	conn, err := p.acquire(ctx)
 	if err != nil {
 		return err
@@ -432,6 +460,13 @@ func (p *Client) QuerySingleJSON(
 	out interface{},
 	args ...interface{},
 ) error {
+	if tx, hasTx := TxFromContext(ctx); hasTx {
+		if subTx, hasSubtx := SubtxFromContext(ctx); hasSubtx {
+			return subTx.QuerySingleJSON(ctx, cmd, out, args...)
+		}
+		return tx.QuerySingleJSON(ctx, cmd, out, args...)
+	}
+
 	conn, err := p.acquire(ctx)
 	if err != nil {
 		return err

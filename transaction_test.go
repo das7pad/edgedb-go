@@ -116,6 +116,44 @@ func TestTxCommits(t *testing.T) {
 	)
 }
 
+func TestTxResume(t *testing.T) {
+	parentCtx := context.Background()
+	err := client.Tx(parentCtx, func(txCtx context.Context, tx *Tx) error {
+		{
+			storedTx, found := TxFromContext(txCtx)
+			require.True(t, found, "Tx not stored in child Context")
+			require.Equal(t, tx, storedTx, "other Tx stored")
+		}
+		{
+			nonStoredTx, found := TxFromContext(parentCtx)
+			require.False(t, found, "Tx found on empty Context")
+			require.Nil(t, nonStoredTx, "found non stored Tx")
+		}
+		{
+			parentQuery := "INSERT TxTest {name := 'TxResume parentCtx'};"
+			if err := client.Execute(parentCtx, parentQuery); err != nil {
+				return err
+			}
+		}
+		{
+			childQuery := "INSERT TxTest {name := 'TxResume txCtx'};"
+			if err := client.Execute(txCtx, childQuery); err != nil {
+				return err
+			}
+		}
+		return errors.New("trigger roll back")
+	})
+	require.Error(t, err, "trigger roll back")
+
+	query := `
+		SELECT (SELECT TxTest {name} FILTER .name LIKE 'TxResume %').name
+	`
+	var names []string
+	err = client.Query(parentCtx, query, &names)
+	require.NoError(t, err)
+	require.Equal(t, []string{"TxResume parentCtx"}, names, "Tx not resumed")
+}
+
 func newTxOpts(level IsolationLevel, readOnly, deferrable bool) TxOptions {
 	return NewTxOptions().
 		WithIsolation(level).

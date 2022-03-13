@@ -157,3 +157,44 @@ func TestSubtxBorrowing(t *testing.T) {
 	})
 	assert.NoError(t, err)
 }
+
+func TestSubtxResume(t *testing.T) {
+	parentCtx := context.Background()
+	err := client.Tx(parentCtx, func(txCtx context.Context, tx *Tx) error {
+		return tx.Subtx(txCtx, func(stxCtx context.Context, stx *Subtx) error {
+			storedTx, found := SubtxFromContext(stxCtx)
+			require.True(t, found, "Subtx not stored in child Context")
+			require.Equal(t, stx, storedTx, "other Subtx stored")
+
+			nonStoredTx, found := SubtxFromContext(txCtx)
+			require.False(t, found, "Subtx found on Tx Context")
+			require.Nil(t, nonStoredTx, "found non stored Subtx")
+
+			nonStoredTx, found = SubtxFromContext(parentCtx)
+			require.False(t, found, "Tx found on parent Context")
+			require.Nil(t, nonStoredTx, "found non stored Subtx")
+
+			parentQuery := "INSERT TxTest {name := 'SubtxResume parentCtx'};"
+			if err := client.Execute(parentCtx, parentQuery); err != nil {
+				return err
+			}
+
+			subtxQuery := "INSERT TxTest {name := 'SubtxResume stxCtx'};"
+			if err := client.Execute(stxCtx, subtxQuery); err != nil {
+				return err
+			}
+			return errors.New("trigger roll back")
+		})
+	})
+	require.Error(t, err, "trigger roll back")
+
+	query := `SELECT (
+		SELECT TxTest {name} FILTER .name LIKE 'SubtxResume %'
+	).name`
+	var names []string
+	err = client.Query(parentCtx, query, &names)
+	require.NoError(t, err)
+	require.Equal(
+		t, []string{"SubtxResume parentCtx"}, names, "Subtx not resumed",
+	)
+}

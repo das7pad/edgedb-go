@@ -20,6 +20,15 @@ import (
 	"context"
 )
 
+type subTxContextKey struct{}
+
+// SubtxFromContext returns the last Subtx from the context chain, if any.
+// The context.Context argument from a SubtxBlock will have one stored.
+func SubtxFromContext(ctx context.Context) (*Subtx, bool) {
+	subtx, ok := ctx.Value(subTxContextKey{}).(*Subtx)
+	return subtx, ok
+}
+
 type subtxable interface {
 	borrow(string) (*protocolConnection, error)
 	unborrow() error
@@ -48,7 +57,8 @@ func runSubtx(
 		return e
 	}
 
-	if e := action(ctx, subtx); e != nil {
+	subTxCtx := context.WithValue(ctx, subTxContextKey{}, subtx)
+	if e := action(subTxCtx, subtx); e != nil {
 		return firstError(subtx.rollback(ctx), e)
 	}
 
@@ -56,6 +66,7 @@ func runSubtx(
 }
 
 // SubtxBlock is work to be done in a subtransaction.
+// Passing the context.Context argument to a Client call will resume the Subtx.
 type SubtxBlock func(context.Context, *Subtx) error
 
 // Subtx is a subtransaction.
