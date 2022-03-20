@@ -28,21 +28,17 @@ func NewServerSettings() *ServerSettings {
 // ServerSettings manually.
 type ServerSettings struct {
 	settings map[string][]byte
-	mx       sync.RWMutex
+	mx       sync.Mutex
 }
 
 // GetOk returns the value for key.
 func (s *ServerSettings) GetOk(key string) ([]byte, bool) {
-	s.mx.RLock()
-	defer s.mx.RUnlock()
 	val, ok := s.settings[key]
 	return val, ok
 }
 
 // Get returns the value for key.
 func (s *ServerSettings) Get(key string) []byte {
-	s.mx.RLock()
-	defer s.mx.RUnlock()
 	return s.settings[key]
 }
 
@@ -50,5 +46,10 @@ func (s *ServerSettings) Get(key string) []byte {
 func (s *ServerSettings) Set(key string, val []byte) {
 	s.mx.Lock()
 	defer s.mx.Unlock()
-	s.settings[key] = val
+	newSettings := make(map[string][]byte, len(s.settings)+1)
+	for k, v := range s.settings {
+		newSettings[k] = v
+	}
+	newSettings[key] = val
+	s.settings = newSettings
 }
