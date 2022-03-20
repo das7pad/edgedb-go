@@ -24,12 +24,11 @@ import (
 	"github.com/edgedb/edgedb-go/internal"
 	"github.com/edgedb/edgedb-go/internal/buff"
 	"github.com/edgedb/edgedb-go/internal/cache"
-	"github.com/edgedb/edgedb-go/internal/snc"
 	"github.com/edgedb/edgedb-go/internal/soc"
 )
 
 type cacheCollection struct {
-	serverSettings    *snc.ServerSettings
+	serverSettings    *serverSettings
 	typeIDCache       *cache.Cache
 	inCodecCache      *cache.Cache
 	outCodecCache     *cache.Cache

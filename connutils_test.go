@@ -34,8 +34,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/edgedb/edgedb-go/internal/snc"
 )
 
 func setenvmap(m map[string]string) func() {
@@ -76,15 +74,9 @@ func setenv(key, val string) func() {
 	}
 }
 
-func newServerSettingValues(settings map[string][]byte) *snc.ServerSettings {
-	s := snc.NewServerSettings()
-	for k, v := range settings {
-		s.Set(k, v)
-	}
-	return s
-}
-
 func TestConUtils(t *testing.T) {
+	fortyTwo := 42
+
 	type Result struct {
 		cfg        connConfig
 		err        error
@@ -109,7 +101,6 @@ func TestConUtils(t *testing.T) {
 					addr:               dialArgs{"tcp", "localhost:5656"},
 					user:               "user",
 					database:           "edgedb",
-					serverSettings:     snc.NewServerSettings(),
 					waitUntilAvailable: 30 * time.Second,
 					tlsSecurity:        "strict",
 				},
@@ -130,7 +121,6 @@ func TestConUtils(t *testing.T) {
 					user:               "user",
 					password:           "passw",
 					database:           "testdb",
-					serverSettings:     snc.NewServerSettings(),
 					waitUntilAvailable: 30 * time.Second,
 					tlsSecurity:        "strict",
 				},
@@ -158,7 +148,6 @@ func TestConUtils(t *testing.T) {
 					user:               "user2",
 					password:           "passw2",
 					database:           "db2",
-					serverSettings:     snc.NewServerSettings(),
 					waitUntilAvailable: 30 * time.Second,
 					tlsSecurity:        "strict",
 				},
@@ -176,10 +165,12 @@ func TestConUtils(t *testing.T) {
 			},
 			dsn: "edgedb://user3:123123@localhost/abcdef",
 			opts: Options{
-				User:           "user2",
-				Password:       NewOptionalStr("passw2"),
-				Database:       "db2",
-				ServerSettings: map[string][]byte{"ssl": []byte("False")},
+				User:     "user2",
+				Password: NewOptionalStr("passw2"),
+				Database: "db2",
+				ServerSettings: map[string][]byte{
+					"suggested_pool_concurrency": []byte("42"),
+				},
 			},
 			expected: Result{
 				cfg: connConfig{
@@ -187,9 +178,9 @@ func TestConUtils(t *testing.T) {
 					user:     "user2",
 					password: "passw2",
 					database: "db2",
-					serverSettings: newServerSettingValues(map[string][]byte{
-						"ssl": []byte("False"),
-					}),
+					serverSettings: serverSettings{
+						suggestedPoolConcurrency: &fortyTwo,
+					},
 					waitUntilAvailable: 30 * time.Second,
 					tlsSecurity:        "strict",
 				},
@@ -211,7 +202,6 @@ func TestConUtils(t *testing.T) {
 					user:               "user3",
 					password:           "123123",
 					database:           "abcdef",
-					serverSettings:     snc.NewServerSettings(),
 					waitUntilAvailable: 30 * time.Second,
 					tlsSecurity:        "strict",
 				},
@@ -226,7 +216,6 @@ func TestConUtils(t *testing.T) {
 					user:               "user3",
 					password:           "123123",
 					database:           "abcdef",
-					serverSettings:     snc.NewServerSettings(),
 					waitUntilAvailable: 30 * time.Second,
 					tlsSecurity:        "strict",
 				},
@@ -293,8 +282,8 @@ func TestConUtils(t *testing.T) {
 		},
 		{
 			name: "DSN with server settings",
-			dsn: "edgedb://?param=123&host=testhost&user=testuser" +
-				"&port=2222&database=testdb",
+			dsn: "edgedb://?suggested_pool_concurrency=42" +
+				"&host=testhost&user=testuser&port=2222&database=testdb",
 			opts: Options{
 				User:     "me",
 				Password: NewOptionalStr("ask"),
@@ -303,9 +292,9 @@ func TestConUtils(t *testing.T) {
 			expected: Result{
 				cfg: connConfig{
 					addr: dialArgs{"tcp", "testhost:2222"},
-					serverSettings: newServerSettingValues(map[string][]byte{
-						"param": []byte("123"),
-					}),
+					serverSettings: serverSettings{
+						suggestedPoolConcurrency: &fortyTwo,
+					},
 					user:               "me",
 					password:           "ask",
 					database:           "db",
@@ -319,18 +308,18 @@ func TestConUtils(t *testing.T) {
 			dsn: "edgedb://?param=123&host=testhost&user=testuser" +
 				"&port=2222&database=testdb",
 			opts: Options{
-				User:           "me",
-				Password:       NewOptionalStr("ask"),
-				Database:       "db",
-				ServerSettings: map[string][]byte{"aa": []byte("bb")},
+				User:     "me",
+				Password: NewOptionalStr("ask"),
+				Database: "db",
+				ServerSettings: map[string][]byte{
+					"suggested_pool_concurrency": []byte("42")},
 			},
 			expected: Result{
 				cfg: connConfig{
 					addr: dialArgs{"tcp", "testhost:2222"},
-					serverSettings: newServerSettingValues(map[string][]byte{
-						"aa":    []byte("bb"),
-						"param": []byte("123"),
-					}),
+					serverSettings: serverSettings{
+						suggestedPoolConcurrency: &fortyTwo,
+					},
 					user:               "me",
 					password:           "ask",
 					database:           "db",
@@ -347,7 +336,6 @@ func TestConUtils(t *testing.T) {
 					addr:               dialArgs{"unix", "/unix_sock/test"},
 					database:           "dbname",
 					user:               "spam",
-					serverSettings:     snc.NewServerSettings(),
 					tlsSecurity:        "strict",
 					waitUntilAvailable: 30 * time.Second,
 				},
@@ -370,7 +358,6 @@ func TestConUtils(t *testing.T) {
 					addr:               dialArgs{"unix", "/tmp"},
 					database:           "edgedb",
 					user:               "user",
-					serverSettings:     snc.NewServerSettings(),
 					tlsSecurity:        "strict",
 					waitUntilAvailable: 30 * time.Second,
 				},
@@ -605,7 +592,6 @@ func TestConnectionParameterResolution(t *testing.T) {
 			}
 
 			expectedResult := connConfig{
-				serverSettings:     snc.NewServerSettings(),
 				waitUntilAvailable: 30 * time.Second,
 			}
 
@@ -630,7 +616,11 @@ func TestConnectionParameterResolution(t *testing.T) {
 
 				ss := res["serverSettings"].(map[string]interface{})
 				for k, v := range ss {
-					expectedResult.serverSettings.Set(k, []byte(v.(string)))
+					require.NoError(t, expectedResult.serverSettings.Set(
+						k,
+						[]byte(v.(string)),
+						protocolVersionMin,
+					))
 				}
 			}
 
