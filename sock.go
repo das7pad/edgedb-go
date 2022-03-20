@@ -106,20 +106,21 @@ type autoClosingSocket struct {
 }
 
 func (s *autoClosingSocket) Closed() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.isClosed
 }
 
 func (s *autoClosingSocket) Close() error {
-	var err error
-	s.mu.Lock()
-	if !s.isClosed {
-		s.isClosed = true
-		err = s.conn.Close()
+	if s.isClosed {
+		return nil
 	}
+	s.mu.Lock()
+	alreadyClosed := s.isClosed
+	s.isClosed = true
 	s.mu.Unlock()
-	return wrapNetError(err)
+	if alreadyClosed {
+		return nil
+	}
+	return wrapNetError(s.conn.Close())
 }
 
 func (s *autoClosingSocket) Read(p []byte) (int, error) {
