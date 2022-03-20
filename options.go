@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/rand"
 	"time"
 )
 
@@ -138,8 +139,8 @@ const (
 type RetryBackoff func(n int) time.Duration
 
 func defaultBackoff(attempt int) time.Duration {
-	backoff := math.Pow(2.0, float64(attempt)) * 100.0
-	jitter := rnd.Float64() * 100.0
+	backoff := int64(math.Pow(2.0, float64(attempt)) * 100.0)
+	jitter := rand.Int63n(100)
 	return time.Duration(backoff+jitter) * time.Millisecond
 }
 

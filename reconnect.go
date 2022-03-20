@@ -19,6 +19,7 @@ package edgedb
 import (
 	"context"
 	"errors"
+	"math/rand"
 	"time"
 
 	"github.com/edgedb/edgedb-go/internal/header"
@@ -69,7 +70,7 @@ func (c *reconnectingConn) reconnect(
 			return err
 		}
 
-		time.Sleep(time.Duration(10+rnd.Intn(200)) * time.Millisecond)
+		time.Sleep(time.Duration(10+rand.Int63n(200)) * time.Millisecond)
 	}
 }
 
