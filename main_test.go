@@ -55,6 +55,7 @@ func executeOrPanic(command string) {
 type serverInfo struct {
 	TLSCertFile string `json:"tls_cert_file"`
 	Port        int    `json:"port"`
+	SocketDir   string `json:"socket_dir"`
 }
 
 func getServerInfo(fileName string) (*serverInfo, error) {
@@ -176,8 +177,9 @@ func startServer() {
 	}
 
 	opts = Options{
-		Host:     "127.0.0.1",
-		Port:     info.Port,
+		Host: fmt.Sprintf(
+			"%s/.s.EDGEDB.admin.%d", info.SocketDir, info.Port,
+		),
 		User:     "test",
 		Password: NewOptionalStr("shhh"),
 		Database: "edgedb",
