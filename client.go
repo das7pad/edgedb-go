@@ -140,29 +140,32 @@ func (p *Client) acquire(ctx context.Context) (*transactableConn, error) {
 		return nil, &interfaceError{msg: "client closed"}
 	}
 
-	p.potentialConnsMutext.Lock()
 	if p.potentialConns == nil {
-		conn, err := p.newConn(ctx)
-		if err != nil {
+		// Create connection pool guard under lock.
+		p.potentialConnsMutext.Lock()
+		if p.potentialConns == nil {
+			conn, err := p.newConn(ctx)
+			if err != nil {
+				p.potentialConnsMutext.Unlock()
+				return nil, err
+			}
+
+			if p.concurrency == 0 {
+				// The user did not set Concurrency in provided Options.
+				// See if the server sends a suggested max size.
+				p.concurrency = conn.cfg.serverSettings.GetPoolCurrency()
+			}
+
+			p.potentialConns = make(chan struct{}, p.concurrency)
+			for i := 0; i < p.concurrency-1; i++ {
+				p.potentialConns <- struct{}{}
+			}
+
 			p.potentialConnsMutext.Unlock()
-			return nil, err
+			return conn, nil
 		}
-
-		if p.concurrency == 0 {
-			// The user did not set Concurrency in provided Options.
-			// See if the server sends a suggested max size.
-			p.concurrency = conn.cfg.serverSettings.GetPoolCurrency()
-		}
-
-		p.potentialConns = make(chan struct{}, p.concurrency)
-		for i := 0; i < p.concurrency-1; i++ {
-			p.potentialConns <- struct{}{}
-		}
-
 		p.potentialConnsMutext.Unlock()
-		return conn, nil
 	}
-	p.potentialConnsMutext.Unlock()
 
 	// force do nothing if context is expired
 	select {
