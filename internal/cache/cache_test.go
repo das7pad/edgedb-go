@@ -17,7 +17,9 @@
 package cache
 
 import (
+	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -76,4 +78,222 @@ func TestCachePutConcurencySafe(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		<-done
 	}
+}
+
+func BenchmarkCache_GetMiss(b *testing.B) {
+	cache := New(1_000)
+	for i := 0; i < b.N; i++ {
+		cache.Get("x")
+	}
+}
+
+func BenchmarkCache_GetHit(b *testing.B) {
+	cache := New(1_000)
+	cache.Put("x", "y")
+	for i := 0; i < b.N; i++ {
+		cache.Get("x")
+	}
+}
+
+func BenchmarkCache_PutSame(b *testing.B) {
+	cache := New(1_000)
+	for i := 0; i < b.N; i++ {
+		cache.Put("x", "y")
+	}
+}
+
+func BenchmarkCache_PutUniq(b *testing.B) {
+	cache := New(1_000)
+	for i := 0; i < b.N; i++ {
+		cache.Put(i%1_000, "y")
+	}
+}
+
+func BenchmarkMap_GetMiss(b *testing.B) {
+	cache := &sync.Map{}
+	for i := 0; i < b.N; i++ {
+		cache.Load("x")
+	}
+}
+
+func BenchmarkMap_GetHit(b *testing.B) {
+	cache := &sync.Map{}
+	cache.Store("x", "y")
+	for i := 0; i < b.N; i++ {
+		cache.Load("x")
+	}
+}
+
+func BenchmarkMap_PutSame(b *testing.B) {
+	cache := &sync.Map{}
+	for i := 0; i < b.N; i++ {
+		cache.Store("x", "y")
+	}
+}
+
+func BenchmarkMap_PutUniq(b *testing.B) {
+	cache := &sync.Map{}
+	for i := 0; i < b.N; i++ {
+		cache.Store(i%1_000, "y")
+	}
+}
+
+const parallelism = 4
+
+func init() {
+	fmt.Printf("internal.cache.cache_test: parallelism=%d\n", parallelism)
+}
+
+func BenchmarkCacheParallel_GetMiss(b *testing.B) {
+	cache := New(1_000)
+	wg := &sync.WaitGroup{}
+	for w := 0; w < parallelism; w++ {
+		wg.Add(1)
+		go func() {
+			for i := 0; i < b.N; i++ {
+				cache.Get("x")
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+func BenchmarkCacheParallel_GetHit(b *testing.B) {
+	cache := New(1_000)
+	cache.Put("x", "y")
+	wg := &sync.WaitGroup{}
+	for w := 0; w < parallelism; w++ {
+		wg.Add(1)
+		go func() {
+			for i := 0; i < b.N; i++ {
+				cache.Get("x")
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+func BenchmarkCacheParallel_PutSame(b *testing.B) {
+	cache := New(1_000)
+	wg := &sync.WaitGroup{}
+	for w := 0; w < parallelism; w++ {
+		wg.Add(1)
+		go func() {
+			for i := 0; i < b.N; i++ {
+				cache.Put("x", "y")
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+func BenchmarkCacheParallel_PutDistinct(b *testing.B) {
+	cache := New(1_000)
+	wg := &sync.WaitGroup{}
+	for w := 0; w < parallelism; w++ {
+		wg.Add(1)
+		go func(w int) {
+			for i := 0; i < b.N; i++ {
+				cache.Put(w, "y")
+			}
+			wg.Done()
+		}(w)
+	}
+	wg.Wait()
+}
+
+func BenchmarkCacheParallel_PutUniq(b *testing.B) {
+	cache := New(1_000)
+	wg := &sync.WaitGroup{}
+	for w := 0; w < parallelism; w++ {
+		wg.Add(1)
+		go func(w int) {
+			w *= b.N
+			for i := 0; i < b.N; i++ {
+				cache.Put(w+i%1_000, "y")
+			}
+			wg.Done()
+		}(w)
+	}
+	wg.Wait()
+}
+
+func BenchmarkMapParallel_GetMiss(b *testing.B) {
+	cache := &sync.Map{}
+	wg := &sync.WaitGroup{}
+	for w := 0; w < parallelism; w++ {
+		wg.Add(1)
+		go func() {
+			for i := 0; i < b.N; i++ {
+				cache.Load("x")
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+func BenchmarkMapParallel_GetHit(b *testing.B) {
+	cache := &sync.Map{}
+	cache.Store("x", "y")
+	wg := &sync.WaitGroup{}
+	for w := 0; w < parallelism; w++ {
+		wg.Add(1)
+		go func() {
+			for i := 0; i < b.N; i++ {
+				cache.Load("x")
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+func BenchmarkMapParallel_PutSame(b *testing.B) {
+	cache := &sync.Map{}
+	wg := &sync.WaitGroup{}
+	for w := 0; w < parallelism; w++ {
+		wg.Add(1)
+		go func() {
+			for i := 0; i < b.N; i++ {
+				cache.Store("x", "y")
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+func BenchmarkMapParallel_PutDistinct(b *testing.B) {
+	cache := &sync.Map{}
+	wg := &sync.WaitGroup{}
+	for w := 0; w < parallelism; w++ {
+		wg.Add(1)
+		go func(w int) {
+			for i := 0; i < b.N; i++ {
+				cache.Store(w, "y")
+			}
+			wg.Done()
+		}(w)
+	}
+	wg.Wait()
+}
+
+func BenchmarkMapParallel_PutUniq(b *testing.B) {
+	cache := &sync.Map{}
+	wg := &sync.WaitGroup{}
+	for w := 0; w < parallelism; w++ {
+		wg.Add(1)
+		go func(w int) {
+			w *= b.N
+			for i := 0; i < b.N; i++ {
+				cache.Store(w+i%1_000, "y")
+			}
+			wg.Done()
+		}(w)
+	}
+	wg.Wait()
 }
