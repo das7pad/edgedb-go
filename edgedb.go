@@ -19,20 +19,20 @@ package edgedb
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/edgedb/edgedb-go/internal"
 	"github.com/edgedb/edgedb-go/internal/buff"
-	"github.com/edgedb/edgedb-go/internal/cache"
 	"github.com/edgedb/edgedb-go/internal/soc"
 )
 
 type cacheCollection struct {
 	serverSettings    *serverSettings
-	typeIDCache       *cache.Cache
-	inCodecCache      *cache.Cache
-	outCodecCache     *cache.Cache
-	capabilitiesCache *cache.Cache // nolint:structcheck
+	typeIDCache       *sync.Map
+	inCodecCache      *sync.Map
+	outCodecCache     *sync.Map
+	capabilitiesCache *sync.Map // nolint:structcheck
 }
 
 type protocolConnection struct {

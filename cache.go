@@ -46,14 +46,14 @@ Optimistic execute flow:
 import (
 	"encoding/binary"
 	"reflect"
+	"sync"
 
-	"github.com/edgedb/edgedb-go/internal/cache"
 	"github.com/edgedb/edgedb-go/internal/codecs"
 	"github.com/edgedb/edgedb-go/internal/descriptor"
 	"github.com/edgedb/edgedb-go/internal/header"
 )
 
-var descCache = cache.New(1_000)
+var descCache = &sync.Map{}
 
 type codecKey struct {
 	ID   UUID
@@ -92,7 +92,7 @@ func makeKey(q *gfQuery) queryKey {
 }
 
 func (c *protocolConnection) getCachedTypeIDs(q *gfQuery) (*idPair, bool) {
-	if val, ok := c.typeIDCache.Get(makeKey(q)); ok {
+	if val, ok := c.typeIDCache.Load(makeKey(q)); ok {
 		x := val.(idPair)
 		return &x, true
 	}
@@ -101,7 +101,7 @@ func (c *protocolConnection) getCachedTypeIDs(q *gfQuery) (*idPair, bool) {
 }
 
 func (c *protocolConnection) cacheTypeIDs(q *gfQuery, ids idPair) {
-	c.typeIDCache.Put(makeKey(q), ids)
+	c.typeIDCache.Store(makeKey(q), ids)
 }
 
 func (c *protocolConnection) cacheCapabilities(
@@ -110,12 +110,12 @@ func (c *protocolConnection) cacheCapabilities(
 ) {
 	if capabilities, ok := headers[header.Capabilities]; ok {
 		x := binary.BigEndian.Uint64(capabilities)
-		c.capabilitiesCache.Put(makeKey(q), x)
+		c.capabilitiesCache.Store(makeKey(q), x)
 	}
 }
 
 func (c *reconnectingConn) getCachedCapabilities(q *gfQuery) (uint64, bool) {
-	if val, ok := c.capabilitiesCache.Get(makeKey(q)); ok {
+	if val, ok := c.capabilitiesCache.Load(makeKey(q)); ok {
 		x := val.(uint64)
 		return x, true
 	}

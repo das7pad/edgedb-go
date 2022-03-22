@@ -28,7 +28,6 @@ import (
 
 	"github.com/edgedb/edgedb-go/internal"
 	"github.com/edgedb/edgedb-go/internal/buff"
-	"github.com/edgedb/edgedb-go/internal/cache"
 	"github.com/edgedb/edgedb-go/internal/codecs"
 	"github.com/edgedb/edgedb-go/internal/descriptor"
 )
@@ -105,10 +104,10 @@ func CreateClientDSN(ctx context.Context, dsn string, opts Options) (*Client, er
 		},
 		cacheCollection: cacheCollection{
 			serverSettings:    &cfg.serverSettings,
-			typeIDCache:       cache.New(1_000),
-			inCodecCache:      cache.New(1_000),
-			outCodecCache:     cache.New(1_000),
-			capabilitiesCache: cache.New(1_000),
+			typeIDCache:       &sync.Map{},
+			inCodecCache:      &sync.Map{},
+			outCodecCache:     &sync.Map{},
+			capabilitiesCache: &sync.Map{},
 		},
 	}
 

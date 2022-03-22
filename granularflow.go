@@ -90,9 +90,9 @@ func (c *protocolConnection) codecsFromIDs(
 ) (*codecPair, error) {
 	var err error
 
-	in, ok := c.inCodecCache.Get(ids.in)
+	in, ok := c.inCodecCache.Load(ids.in)
 	if !ok {
-		desc, OK := descCache.Get(ids.in)
+		desc, OK := descCache.Load(ids.in)
 		if !OK {
 			return nil, nil
 		}
@@ -106,9 +106,9 @@ func (c *protocolConnection) codecsFromIDs(
 		}
 	}
 
-	out, ok := c.outCodecCache.Get(codecKey{ID: ids.out, Type: q.outType})
+	out, ok := c.outCodecCache.Load(codecKey{ID: ids.out, Type: q.outType})
 	if !ok {
-		desc, OK := descCache.Get(ids.out)
+		desc, OK := descCache.Load(ids.out)
 		if !OK {
 			return nil, nil
 		}
@@ -150,8 +150,8 @@ func (c *protocolConnection) codecsFromDescriptors(
 		}
 	}
 
-	c.inCodecCache.Put(cdcs.in.DescriptorID(), cdcs.in)
-	c.outCodecCache.Put(
+	c.inCodecCache.Store(cdcs.in.DescriptorID(), cdcs.in)
+	c.outCodecCache.Store(
 		codecKey{ID: cdcs.out.DescriptorID(), Type: q.outType},
 		cdcs.out,
 	)
@@ -523,7 +523,7 @@ func (c *protocolConnection) decodeCommandDataDescriptionMsg(
 		)}
 	}
 
-	descCache.Put(descs.in.ID, descs.in)
-	descCache.Put(descs.out.ID, descs.out)
+	descCache.Store(descs.in.ID, descs.in)
+	descCache.Store(descs.out.ID, descs.out)
 	return &descs, headers, nil
 }
