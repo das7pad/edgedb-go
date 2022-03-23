@@ -272,10 +272,19 @@ func (p *Client) release(conn *transactableConn, err error) error {
 	select {
 	case p.freeConns <- acquireIfNotTimedout:
 		go func() {
+			if conn.closingTimer == nil {
+				conn.closingTimer = time.NewTimer(timeout)
+			} else {
+				conn.closingTimer.Reset(timeout)
+			}
 			select {
 			case <-cancel:
+				if !conn.closingTimer.Stop() {
+					// Expired at the same time. Clean channel.
+					<-conn.closingTimer.C
+				}
 				connChan <- conn
-			case <-time.After(timeout):
+			case <-conn.closingTimer.C:
 				connChan <- nil
 				if e := conn.Close(); e != nil {
 					log.Println("error while closing idle connection:", e)
