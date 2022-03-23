@@ -51,13 +51,15 @@ type Client struct {
 	isClosed      *bool
 	isClosedMutex *sync.RWMutex // locks isClosed
 
+	// Guard both freeConns and potentialConns assignments.
+	connectionPoolMutex *sync.Mutex
+
 	// A buffered channel of connections ready for use.
 	freeConns chan func() *transactableConn
 
 	// A buffered channel of structs representing unconnected capacity.
 	// This field remains nil until the first connection is acquired.
-	potentialConns       chan struct{}
-	potentialConnsMutext *sync.Mutex
+	potentialConns chan struct{}
 
 	concurrency int
 
@@ -91,13 +93,12 @@ func CreateClientDSN(ctx context.Context, dsn string, opts Options) (*Client, er
 
 	False := false
 	p := &Client{
-		isClosed:             &False,
-		isClosedMutex:        &sync.RWMutex{},
-		cfg:                  cfg,
-		txOpts:               NewTxOptions(),
-		concurrency:          int(opts.Concurrency),
-		freeConns:            make(chan func() *transactableConn, 1),
-		potentialConnsMutext: &sync.Mutex{},
+		isClosed:            &False,
+		isClosedMutex:       &sync.RWMutex{},
+		cfg:                 cfg,
+		txOpts:              NewTxOptions(),
+		concurrency:         int(opts.Concurrency),
+		connectionPoolMutex: &sync.Mutex{},
 		retryOpts: RetryOptions{
 			txConflict: RetryRule{attempts: 3, backoff: defaultBackoff},
 			network:    RetryRule{attempts: 3, backoff: defaultBackoff},
@@ -140,12 +141,12 @@ func (p *Client) acquire(ctx context.Context) (*transactableConn, error) {
 	}
 
 	if p.potentialConns == nil {
-		// Create connection pool guard under lock.
-		p.potentialConnsMutext.Lock()
+		// Create connection pools guard under lock.
+		p.connectionPoolMutex.Lock()
 		if p.potentialConns == nil {
 			conn, err := p.newConn(ctx)
 			if err != nil {
-				p.potentialConnsMutext.Unlock()
+				p.connectionPoolMutex.Unlock()
 				return nil, err
 			}
 
@@ -155,15 +156,16 @@ func (p *Client) acquire(ctx context.Context) (*transactableConn, error) {
 				p.concurrency = conn.cfg.serverSettings.GetPoolCurrency()
 			}
 
+			p.freeConns = make(chan func() *transactableConn, p.concurrency)
 			p.potentialConns = make(chan struct{}, p.concurrency)
 			for i := 0; i < p.concurrency-1; i++ {
 				p.potentialConns <- struct{}{}
 			}
 
-			p.potentialConnsMutext.Unlock()
+			p.connectionPoolMutex.Unlock()
 			return conn, nil
 		}
-		p.potentialConnsMutext.Unlock()
+		p.connectionPoolMutex.Unlock()
 	}
 
 	// force do nothing if context is expired
@@ -322,13 +324,13 @@ func (p *Client) Close() error {
 	}
 	*p.isClosed = true
 
-	p.potentialConnsMutext.Lock()
+	p.connectionPoolMutex.Lock()
 	if p.potentialConns == nil {
 		// The client never made any connections.
-		p.potentialConnsMutext.Unlock()
+		p.connectionPoolMutex.Unlock()
 		return nil
 	}
-	p.potentialConnsMutext.Unlock()
+	p.connectionPoolMutex.Unlock()
 
 	wg := sync.WaitGroup{}
 	errs := make([]error, p.concurrency)
