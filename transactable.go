@@ -24,8 +24,9 @@ import (
 
 type transactableConn struct {
 	*reconnectingConn
-	txOpts    TxOptions
-	retryOpts RetryOptions
+	txOpts       TxOptions
+	retryOpts    RetryOptions
+	closingTimer *time.Timer
 }
 
 // Execute an EdgeQL command (or commands).
