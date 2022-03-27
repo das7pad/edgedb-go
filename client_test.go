@@ -29,6 +29,109 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSelectComputedSelfRefAfterUpdate(t *testing.T) {
+	ctx := context.Background()
+	executeOrPanic(`
+		START MIGRATION TO {
+			module default {
+				abstract type Node {
+					required property path -> str;
+				}
+				type RootNode extending Node {}
+				type VisibleNode extending Node {
+					required link parent -> Node;
+					multi link children := .<parent[is VisibleNode];
+				}
+			}
+		};
+		POPULATE MIGRATION;
+		COMMIT MIGRATION;
+	`)
+	{
+		// Minimal query
+		// ISE: "there is no range var for (__derived__::expr~2) source in \
+		// 		 <pg.SelectStmt at ...>"
+		err := client.Execute(
+			ctx, `select (update VisibleNode set { }) { children }`,
+		)
+		assert.NoError(t, err)
+	}
+
+	// Full use case
+	type Node struct {
+		ID       UUID   `edgedb:"id"`
+		Path     string `edgedb:"path"`
+		Children []Node `edgedb:"children"`
+	}
+	root := Node{}
+	err := client.QuerySingle(
+		ctx, `insert RootNode { path := '' }`, &root)
+	assert.NoError(t, err)
+
+	level0 := Node{}
+	err = client.QuerySingle(
+		ctx, `
+with parent := (select Node filter .id = <uuid>$0)
+insert VisibleNode { path := parent.path ++ 'l0/', parent := parent }`,
+		&level0, root.ID)
+	assert.NoError(t, err)
+
+	level1 := Node{}
+	err = client.QuerySingle(
+		ctx, `
+with parent := (select Node filter .id = <uuid>$0)
+insert VisibleNode { path := parent.path ++ 'l1/', parent := parent }`,
+		&level1, level0.ID)
+	assert.NoError(t, err)
+
+	revertTx := errors.New("revert tx")
+
+	// OK
+	err = client.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		res := make([]Node, 0)
+		err = tx.Query(
+			ctx, `
+with n := (select Node filter .id = <uuid>$0)
+select (update VisibleNode filter .path like (n.path ++ '%') set {
+	path := 'foo/' ++ VisibleNode.path[len(n.path):],
+}) { path }`,
+			&res, level0.ID)
+		assert.NoError(t, err)
+
+		if assert.Len(t, res, 2) {
+			assert.Equal(t, "foo/", res[0].Path)
+			assert.Equal(t, "foo/l1/", res[1].Path)
+		}
+		return revertTx
+	})
+	assert.Equal(t, revertTx, err)
+
+	// ISE: "there is no range var for (__derived__::expr~21) source in \
+	// 		 <pg.SelectStmt at ...>"
+	err = client.Tx(ctx, func(ctx context.Context, tx *Tx) error {
+		res := make([]Node, 0)
+		err = tx.Query(
+			ctx, `
+with n := (select Node filter .id = <uuid>$0)
+select (update VisibleNode filter .path like (n.path ++ '%') set {
+	path := 'foo/' ++ VisibleNode.path[len(n.path):],
+}) { children, path }`,
+			&res, level0.ID)
+		assert.NoError(t, err)
+
+		if assert.Len(t, res, 2) {
+			assert.Equal(t, "foo/", res[0].Path)
+			assert.Equal(t, "foo/l1/", res[1].Path)
+
+			if assert.Len(t, res[0].Children, 1) {
+				assert.Equal(t, level0.ID, res[0].Children[0].ID)
+			}
+		}
+		return revertTx
+	})
+	assert.Equal(t, revertTx, err)
+}
+
 func TestConnectClient(t *testing.T) {
 	ctx := context.Background()
 	p, err := CreateClient(ctx, opts)
