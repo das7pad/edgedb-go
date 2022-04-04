@@ -244,6 +244,8 @@ func buildScalarDecoder(
 			return &bytesCodec{bytesID}, nil
 		case optionalBytesType:
 			return &optionalBytesDecoder{bytesID}, nil
+		case jsonMessageType:
+			return &bytesCodec{bytesID}, nil
 		default:
 			expectedType = "[]byte or edgedb.OptionalBytes"
 		}
@@ -375,6 +377,8 @@ func buildScalarDecoder(
 			return &jsonCodec{}, nil
 		case optionalBytesType:
 			return &optionalJSONDecoder{}, nil
+		case jsonMessageType:
+			return &jsonCodec{}, nil
 		default:
 			expectedType = "[]byte or edgedb.OptionalBytes"
 		}

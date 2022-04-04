@@ -17,6 +17,7 @@
 package codecs
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"unsafe"
@@ -30,6 +31,7 @@ var (
 	bytesID = types.UUID{
 		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2}
 	bytesType         = reflect.TypeOf([]byte{})
+	jsonMessageType   = reflect.TypeOf(json.RawMessage{})
 	optionalBytesType = reflect.TypeOf(types.OptionalBytes{})
 
 	// JSONBytes is a special case codec for json queries.
@@ -89,6 +91,8 @@ func (c *bytesCodec) Encode(
 			func() error { return missingValueError(in, path) })
 	case marshal.BytesMarshaler:
 		return c.encodeMarshaler(w, in, path)
+	case json.RawMessage:
+		return c.encodeData(w, in)
 	default:
 		return fmt.Errorf("expected %v to be []byte, edgedb.OptionalBytes or "+
 			"BytesMarshaler got %T", path, val)

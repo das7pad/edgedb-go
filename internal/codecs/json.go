@@ -17,6 +17,7 @@
 package codecs
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"unsafe"
@@ -83,6 +84,8 @@ func (c *jsonCodec) Encode(
 			func() error { return missingValueError(in, path) })
 	case marshal.JSONMarshaler:
 		return c.encodeMarshaler(w, in, path)
+	case json.RawMessage:
+		return c.encodeData(w, in)
 	default:
 		return fmt.Errorf("expected %v to be []byte, edgedb.OptionalBytes or "+
 			"JSONMarshaler got %T", path, val)
