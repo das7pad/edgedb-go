@@ -61,10 +61,11 @@ func (r *Reader) Next(doneReadingSignal chan struct{}) bool {
 	}
 
 	if len(r.Buf) > 0 {
-		panic(fmt.Sprintf(
+		r.Err = fmt.Errorf(
 			"cannot finish: unread data in buffer (message type: 0x%x)",
 			r.MsgType,
-		))
+		)
+		return false
 	}
 
 	if r.data != nil && len(r.data.Buf) == 0 {
