@@ -77,12 +77,6 @@ func connectWithTimeout(
 	if err != nil {
 		return nil, err
 	}
-
-	err = socket.SetDeadline(time.Time{})
-	if err != nil {
-		return nil, err
-	}
-
 	return conn, conn.releaseReader(r)
 }
 
