@@ -33,9 +33,9 @@ func TxFromContext(ctx context.Context) (*Tx, bool) {
 
 type transactableConn struct {
 	*reconnectingConn
-	txOpts       TxOptions
-	retryOpts    RetryOptions
-	closingTimer *time.Timer
+	txOpts    TxOptions
+	retryOpts RetryOptions
+	idleSince time.Time
 }
 
 // Execute an EdgeQL command (or commands).
