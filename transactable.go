@@ -36,6 +36,7 @@ type transactableConn struct {
 	txOpts       TxOptions
 	retryOpts    RetryOptions
 	closingTimer *time.Timer
+	idleSince    time.Time
 }
 
 // Execute an EdgeQL command (or commands).

@@ -54,8 +54,8 @@ type Client struct {
 	// Guard both freeConns and potentialConns assignments.
 	connectionPoolMutex *sync.Mutex
 
-	// A buffered channel of connections ready for use.
-	freeConns chan func() *transactableConn
+	// A buffered channel of connections that are ready for use.
+	freeConns chan *transactableConn
 
 	// A buffered channel of structs representing unconnected capacity.
 	// This field remains nil until the first connection is acquired.
@@ -132,6 +132,44 @@ func (p *Client) newConn(ctx context.Context) (*transactableConn, error) {
 	return &conn, nil
 }
 
+func (p *Client) evictStaleConnectionsUntilClosed() {
+	timeout := p.serverSettings.GetIdleConnectionTimeout()
+
+	// 0 or less disables the idle timeout
+	if timeout <= 0 {
+		return
+	}
+
+	staleCutOff := time.Now().Add(-timeout)
+	for p.evictStaleConnectionsOnce(staleCutOff) {
+		// In the worst case (sudden stop of all activity after a cleanup run),
+		//  the effective idle time for connections is 1.5*timeout.
+		time.Sleep(timeout / 2)
+		staleCutOff = staleCutOff.Add(timeout / 2)
+	}
+}
+
+func (p *Client) evictStaleConnectionsOnce(staleCutOff time.Time) bool {
+	p.isClosedMutex.RLock()
+	defer p.isClosedMutex.RUnlock()
+	if *p.isClosed {
+		return false
+	}
+
+	for conn := range p.freeConns {
+		if conn.idleSince.After(staleCutOff) {
+			// We are past the stale connections. Put the idle connection back.
+			p.freeConns <- conn
+			break
+		}
+		if err := conn.Close(); err != nil {
+			log.Println("error while closing idle connection:", err)
+		}
+		p.potentialConns <- struct{}{}
+	}
+	return true
+}
+
 func (p *Client) acquire(ctx context.Context) (*transactableConn, error) {
 	p.isClosedMutex.RLock()
 	defer p.isClosedMutex.RUnlock()
@@ -156,11 +194,12 @@ func (p *Client) acquire(ctx context.Context) (*transactableConn, error) {
 				p.concurrency = conn.cfg.serverSettings.GetPoolCurrency()
 			}
 
-			p.freeConns = make(chan func() *transactableConn, p.concurrency)
+			p.freeConns = make(chan *transactableConn, p.concurrency)
 			p.potentialConns = make(chan struct{}, p.concurrency)
 			for i := 0; i < p.concurrency-1; i++ {
 				p.potentialConns <- struct{}{}
 			}
+			go p.evictStaleConnectionsUntilClosed()
 
 			p.connectionPoolMutex.Unlock()
 			return conn, nil
@@ -177,32 +216,23 @@ func (p *Client) acquire(ctx context.Context) (*transactableConn, error) {
 
 	// force using an existing connection over connecting a new socket.
 	select {
-	case acquireIfNotTimedout := <-p.freeConns:
-		conn := acquireIfNotTimedout()
-		if conn != nil {
-			return conn, nil
-		}
+	case conn := <-p.freeConns:
+		return conn, nil
 	default:
 	}
 
-	for {
-		select {
-		case acquireIfNotTimedout := <-p.freeConns:
-			conn := acquireIfNotTimedout()
-			if conn != nil {
-				return conn, nil
-			}
-			continue
-		case <-p.potentialConns:
-			conn, err := p.newConn(ctx)
-			if err != nil {
-				p.potentialConns <- struct{}{}
-				return nil, err
-			}
-			return conn, nil
-		case <-ctx.Done():
-			return nil, fmt.Errorf("edgedb: %w", ctx.Err())
+	select {
+	case conn := <-p.freeConns:
+		return conn, nil
+	case <-p.potentialConns:
+		conn, err := p.newConn(ctx)
+		if err != nil {
+			p.potentialConns <- struct{}{}
+			return nil, err
 		}
+		return conn, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("edgedb: %w", ctx.Err())
 	}
 }
 
@@ -248,57 +278,8 @@ func (p *Client) release(conn *transactableConn, err error) error {
 		p.potentialConns <- struct{}{}
 		return conn.Close()
 	}
-
-	timeout := p.serverSettings.GetIdleConnectionTimeout()
-
-	// 0 or less disables the idle timeout
-	if timeout <= 0 {
-		select {
-		case p.freeConns <- func() *transactableConn { return conn }:
-			return nil
-		default:
-			// we have MinConns idle so no need to keep this connection.
-			p.potentialConns <- struct{}{}
-			return conn.Close()
-		}
-	}
-
-	cancel := make(chan struct{}, 1)
-	connChan := make(chan *transactableConn, 1)
-
-	acquireIfNotTimedout := func() *transactableConn {
-		cancel <- struct{}{}
-		return <-connChan
-	}
-
-	select {
-	case p.freeConns <- acquireIfNotTimedout:
-		go func() {
-			if conn.closingTimer == nil {
-				conn.closingTimer = time.NewTimer(timeout)
-			} else {
-				conn.closingTimer.Reset(timeout)
-			}
-			select {
-			case <-cancel:
-				if !conn.closingTimer.Stop() {
-					// Expired at the same time. Clean channel.
-					<-conn.closingTimer.C
-				}
-				connChan <- conn
-			case <-conn.closingTimer.C:
-				connChan <- nil
-				if e := conn.Close(); e != nil {
-					log.Println("error while closing idle connection:", e)
-				}
-			}
-		}()
-	default:
-		// we have MinConns idle so no need to keep this connection.
-		p.potentialConns <- struct{}{}
-		return conn.Close()
-	}
-
+	conn.idleSince = time.Now()
+	p.freeConns <- conn
 	return nil
 }
 
@@ -336,13 +317,10 @@ func (p *Client) Close() error {
 	errs := make([]error, p.concurrency)
 	for i := 0; i < p.concurrency; i++ {
 		select {
-		case acquireIfNotTimedout := <-p.freeConns:
+		case conn := <-p.freeConns:
 			wg.Add(1)
 			go func(i int) {
-				conn := acquireIfNotTimedout()
-				if conn != nil {
-					errs[i] = conn.Close()
-				}
+				errs[i] = conn.Close()
 				wg.Done()
 			}(i)
 		case <-p.potentialConns:
