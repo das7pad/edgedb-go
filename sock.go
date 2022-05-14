@@ -98,8 +98,6 @@ type autoClosingSocket struct {
 }
 
 func (s *autoClosingSocket) Closed() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.isClosed
 }
 
