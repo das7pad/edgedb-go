@@ -78,7 +78,7 @@ func (c *reconnectingConn) reconnect(
 
 // ensureConnection reconnects to the server if not connected.
 func (c *reconnectingConn) ensureConnection(ctx context.Context) error {
-	if c.conn != nil && !c.conn.soc.Closed() && !c.isClosed {
+	if !c.conn.soc.Closed() && !c.isClosed {
 		return nil
 	}
 
@@ -112,7 +112,7 @@ func (c *reconnectingConn) Close() (err error) {
 	}
 
 	c.isClosed = true
-	if c.conn != nil && !c.conn.soc.Closed() {
+	if !c.conn.soc.Closed() {
 		err = c.conn.close()
 	}
 
