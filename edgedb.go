@@ -62,6 +62,7 @@ func connectWithTimeout(
 	deadline, _ := ctx.Deadline()
 	err = socket.SetDeadline(deadline)
 	if err != nil {
+		_ = socket.Close()
 		return nil, err
 	}
 
@@ -78,15 +79,21 @@ func connectWithTimeout(
 
 	err = conn.connect(r, cfg)
 	if err != nil {
+		_ = socket.Close()
 		return nil, err
 	}
 
 	err = socket.SetDeadline(time.Time{})
 	if err != nil {
+		_ = socket.Close()
 		return nil, err
 	}
 
-	return conn, conn.releaseReader(r)
+	if err = conn.releaseReader(r); err != nil {
+		_ = socket.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 func (c *protocolConnection) acquireReader(
