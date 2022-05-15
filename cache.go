@@ -101,7 +101,8 @@ func (c *protocolConnection) getCachedTypeIDs(q *gfQuery) (*idPair, bool) {
 }
 
 func (c *protocolConnection) cacheTypeIDs(q *gfQuery, ids idPair) {
-	c.typeIDCache.Store(makeKey(q), ids)
+	// TypeIDs are stable. Only write on cache miss.
+	c.typeIDCache.LoadOrStore(makeKey(q), ids)
 }
 
 func (c *protocolConnection) cacheCapabilities(
@@ -110,7 +111,8 @@ func (c *protocolConnection) cacheCapabilities(
 ) {
 	if capabilities, ok := headers[header.Capabilities]; ok {
 		x := binary.BigEndian.Uint64(capabilities)
-		c.capabilitiesCache.Store(makeKey(q), x)
+		// Capabilities are stable per query. Only write on cache miss.
+		c.capabilitiesCache.LoadOrStore(makeKey(q), x)
 	}
 }
 

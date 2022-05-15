@@ -150,8 +150,9 @@ func (c *protocolConnection) codecsFromDescriptors(
 		}
 	}
 
-	c.inCodecCache.Store(cdcs.in.DescriptorID(), cdcs.in)
-	c.outCodecCache.Store(
+	// DescriptorIDs are stable. Only write on cache miss.
+	c.inCodecCache.LoadOrStore(cdcs.in.DescriptorID(), cdcs.in)
+	c.outCodecCache.LoadOrStore(
 		codecKey{ID: cdcs.out.DescriptorID(), Type: q.outType},
 		cdcs.out,
 	)
@@ -523,7 +524,8 @@ func (c *protocolConnection) decodeCommandDataDescriptionMsg(
 		)}
 	}
 
-	descCache.Store(descs.in.ID, descs.in)
-	descCache.Store(descs.out.ID, descs.out)
+	// DescriptorIDs are stable. Only write on cache miss.
+	descCache.LoadOrStore(descs.in.ID, descs.in)
+	descCache.LoadOrStore(descs.out.ID, descs.out)
 	return &descs, headers, nil
 }
