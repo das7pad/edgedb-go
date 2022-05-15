@@ -278,19 +278,21 @@ func TestMain(m *testing.M) {
 	// active connections. Start a background go routine that keeps an active
 	// connection to the database while the tests run so that the server
 	// doesn't shutdown.
-	done := make(chan struct{}, 1)
+	ticker := time.NewTicker(time.Second / 2)
 	go func() {
-		var result int64
-		for {
-			select {
-			case <-done:
-				return
-			default:
-				_ = client.QuerySingle(ctx, "SELECT 1", &result)
-			}
+		// Use a dedicated client/connection pool for all db keepalive activity.
+		// This will allow the tests for connection re-use to see the same
+		//  connection(s) from the main connection pool.
+		keepAliveClient, err2 := CreateClient(ctx, opts)
+		if err2 != nil {
+			panic(err2)
 		}
+		for range ticker.C {
+			_ = keepAliveClient.Execute(ctx, "SELECT 1;")
+		}
+		_ = keepAliveClient.Close()
 	}()
-	defer func() { done <- struct{}{} }()
+	defer ticker.Stop()
 
 	log.Println("starting tests")
 	code = m.Run()
