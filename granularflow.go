@@ -187,10 +187,10 @@ func (c *protocolConnection) prepare(q *gfQuery) error {
 		ids idPair
 	)
 
-	done := buff.NewSignal()
+	waitForMore := true
 
 	r := c.r
-	for r.Next(done.Chan) {
+	for r.Next(&waitForMore) {
 		switch r.MsgType {
 		case message.PrepareComplete:
 			c.cacheCapabilities(q, decodeHeaders(r))
@@ -198,7 +198,7 @@ func (c *protocolConnection) prepare(q *gfQuery) error {
 			ids = idPair{in: [16]byte(r.PopUUID()), out: [16]byte(r.PopUUID())}
 		case message.ReadyForCommand:
 			decodeReadyForCommandMsg(r)
-			done.Signal()
+			waitForMore = false
 		case message.ErrorResponse:
 			err = wrapAll(err, decodeErrorResponseMsg(r, q.cmd))
 		default:
@@ -239,16 +239,16 @@ func (c *protocolConnection) describe(
 		descs *descPair
 		err   error
 	)
-	done := buff.NewSignal()
+	waitForMore := true
 
 	r := c.r
-	for r.Next(done.Chan) {
+	for r.Next(&waitForMore) {
 		switch r.MsgType {
 		case message.CommandDataDescription:
 			descs, _, err = c.decodeCommandDataDescriptionMsg(q)
 		case message.ReadyForCommand:
 			decodeReadyForCommandMsg(r)
-			done.Signal()
+			waitForMore = false
 		case message.ErrorResponse:
 			err = wrapAll(err, decodeErrorResponseMsg(r, q.cmd))
 		default:
@@ -291,10 +291,10 @@ func (c *protocolConnection) execute(
 	if q.expCard == cardinality.AtMostOne {
 		err = errZeroResults
 	}
-	done := buff.NewSignal()
+	waitForMore := true
 
 	r := c.r
-	for r.Next(done.Chan) {
+	for r.Next(&waitForMore) {
 		switch r.MsgType {
 		case message.Data:
 			val, ok, e := decodeDataMsg(r, q, cdcs)
@@ -316,7 +316,7 @@ func (c *protocolConnection) execute(
 			decodeCommandCompleteMsg(r)
 		case message.ReadyForCommand:
 			decodeReadyForCommandMsg(r)
-			done.Signal()
+			waitForMore = false
 		case message.ErrorResponse:
 			if err == errZeroResults {
 				err = nil
@@ -377,11 +377,11 @@ func (c *protocolConnection) optimistic(
 	if q.expCard == cardinality.AtMostOne {
 		err = errZeroResults
 	}
-	done := buff.NewSignal()
+	waitForMore := true
 
 	var descs *descPair
 	r := c.r
-	for r.Next(done.Chan) {
+	for r.Next(&waitForMore) {
 		switch r.MsgType {
 		case message.Data:
 			val, ok, e := decodeDataMsg(r, q, cdcs)
@@ -407,7 +407,7 @@ func (c *protocolConnection) optimistic(
 			c.cacheCapabilities(q, headers)
 		case message.ReadyForCommand:
 			decodeReadyForCommandMsg(r)
-			done.Signal()
+			waitForMore = false
 		case message.ErrorResponse:
 			if err == errZeroResults {
 				err = nil

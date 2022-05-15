@@ -56,10 +56,10 @@ func (c *protocolConnection) connect(cfg *connConfig) error {
 	}
 
 	var err error
-	done := buff.NewSignal()
+	waitForMore := true
 
 	r := c.r
-	for r.Next(done.Chan) {
+	for r.Next(&waitForMore) {
 		switch r.MsgType {
 		case message.ServerHandshake:
 			protocolVersion := internal.ProtocolVersion{
@@ -92,7 +92,7 @@ func (c *protocolConnection) connect(cfg *connConfig) error {
 		case message.ReadyForCommand:
 			ignoreHeaders(r)
 			r.Discard(1) // transaction state
-			done.Signal()
+			waitForMore = false
 		case message.Authentication:
 			if r.PopUint32() == 0 { // auth status
 				continue
@@ -108,10 +108,10 @@ func (c *protocolConnection) connect(cfg *connConfig) error {
 				return e
 			}
 
-			done.Signal()
+			waitForMore = false
 		case message.ErrorResponse:
 			err = wrapAll(err, decodeErrorResponseMsg(r, ""))
-			done.Signal()
+			waitForMore = false
 		default:
 			if e := c.fallThrough(); e != nil {
 				// the connection will not be usable after this x_x
@@ -158,9 +158,9 @@ func (c *protocolConnection) authenticate(cfg *connConfig) error {
 		return e
 	}
 
-	done := buff.NewSignal()
+	waitForMore := true
 	r := c.r
-	for r.Next(done.Chan) {
+	for r.Next(&waitForMore) {
 		switch r.MsgType {
 		case message.Authentication:
 			authStatus := r.PopUint32()
@@ -178,7 +178,7 @@ func (c *protocolConnection) authenticate(cfg *connConfig) error {
 				return &authenticationError{msg: err.Error()}
 			}
 
-			done.Signal()
+			waitForMore = false
 		case message.ErrorResponse:
 			err = decodeErrorResponseMsg(r, "")
 		default:
@@ -206,9 +206,8 @@ func (c *protocolConnection) authenticate(cfg *connConfig) error {
 		return e
 	}
 
-	done = buff.NewSignal()
-
-	for r.Next(done.Chan) {
+	waitForMore = true
+	for r.Next(&waitForMore) {
 		switch r.MsgType {
 		case message.Authentication:
 			authStatus := r.PopUint32()
@@ -232,7 +231,7 @@ func (c *protocolConnection) authenticate(cfg *connConfig) error {
 		case message.ReadyForCommand:
 			ignoreHeaders(r)
 			r.Discard(1) // transaction state
-			done.Signal()
+			waitForMore = false
 		case message.ErrorResponse:
 			err = wrapAll(decodeErrorResponseMsg(r, ""))
 		default:

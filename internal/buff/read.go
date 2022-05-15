@@ -47,15 +47,14 @@ func SimpleReader(buf []byte) *Reader {
 
 // Next advances the reader to the next message.
 // Next returns false when the reader doesn't own any socket data
-// and a signal is received on doneReadingSignal,
-// or an error is encountered while reading.
+//  and waitForMore is false, or an error is encountered while reading.
 //
 // Callers must continue to call Next until it returns false.
 //
 // If the previous message was not fully read Next() panics.
 //
 // Next() panics if called on a reader created with SimpleReader().
-func (r *Reader) Next(doneReadingSignal chan struct{}) bool {
+func (r *Reader) Next(waitForMore *bool) bool {
 	if r.toBeDeserialized == nil {
 		panic("called next on a simple reader")
 	}
@@ -76,30 +75,23 @@ func (r *Reader) Next(doneReadingSignal chan struct{}) bool {
 	r.MsgType = 0
 
 	if r.data == nil {
-		if doneReadingSignal == nil {
+		if *waitForMore {
+			// Wait indefinitely.
+			// When reading fails it will unblock us with a `.Err` payload.
+			r.data = <-r.toBeDeserialized
+		} else {
+			// Just consume what has already been read.
 			select {
 			case r.data = <-r.toBeDeserialized:
-				if r.data.Err != nil {
-					r.Err = r.data.Err
-					r.data.Release()
-					r.data = nil
-					return false
-				}
 			default:
 				return false
 			}
-		} else {
-			select {
-			case <-doneReadingSignal:
-				return false
-			case r.data = <-r.toBeDeserialized:
-				if r.data.Err != nil {
-					r.Err = r.data.Err
-					r.data.Release()
-					r.data = nil
-					return false
-				}
-			}
+		}
+		if r.data.Err != nil {
+			r.Err = r.data.Err
+			r.data.Release()
+			r.data = nil
+			return false
 		}
 	}
 

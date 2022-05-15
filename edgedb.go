@@ -92,7 +92,8 @@ func (c *protocolConnection) pollBackgroundMessages() {
 	if c.soc.Closed() {
 		return
 	}
-	for c.r.Next(nil) {
+	waitForMore := false
+	for c.r.Next(&waitForMore) {
 		if err := c.fallThrough(); err != nil {
 			log.Println(err)
 			_ = c.soc.Close()

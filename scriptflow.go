@@ -76,16 +76,16 @@ func (c *protocolConnection) execScriptFlow(q sfQuery) error {
 	}
 
 	var err error
-	done := buff.NewSignal()
+	waitForMore := true
 
 	r := c.r
-	for r.Next(done.Chan) {
+	for r.Next(&waitForMore) {
 		switch r.MsgType {
 		case message.CommandComplete:
 			decodeCommandCompleteMsg(r)
 		case message.ReadyForCommand:
 			decodeReadyForCommandMsg(r)
-			done.Signal()
+			waitForMore = false
 		case message.ErrorResponse:
 			err = wrapAll(err, decodeErrorResponseMsg(r, q.cmd))
 		default:

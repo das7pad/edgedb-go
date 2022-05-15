@@ -31,7 +31,8 @@ func TestNext(t *testing.T) {
 	toBeDeserialized <- &soc.Data{Buf: []byte{0xa, 0, 0, 0, 8, 1, 2, 3, 4}}
 	r := NewReader(toBeDeserialized)
 
-	assert.True(t, r.Next(nil))
+	waitForMore := false
+	assert.True(t, r.Next(&waitForMore))
 	assert.Equal(t, uint8(0xa), r.MsgType)
 
 	expected := "cannot finish: unread data in buffer (message type: 0xa)"
@@ -41,9 +42,7 @@ func TestNext(t *testing.T) {
 	assert.Equal(t, uint32(0x1020304), r.PopUint32())
 	assert.Panics(t, func() { r.Discard(1) })
 
-	doneReadingSignal := make(chan struct{}, 1)
-	doneReadingSignal <- struct{}{}
-	assert.False(t, r.Next(doneReadingSignal))
+	assert.False(t, r.Next(&waitForMore))
 	assert.Equal(t, uint8(0), r.MsgType)
 	assert.Panics(t, func() { r.Discard(1) })
 }
