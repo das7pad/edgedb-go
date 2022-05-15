@@ -46,6 +46,13 @@ func max(a, b int) int {
 	return b
 }
 
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // Client is a connection pool and is safe for concurrent use.
 type Client struct {
 	isClosed      *bool
@@ -132,45 +139,50 @@ func (p *Client) newConn(ctx context.Context) (*transactableConn, error) {
 	return &conn, nil
 }
 
-func (p *Client) evictStaleConnectionsUntilClosed() {
-	timeout := p.serverSettings.GetIdleConnectionTimeout()
+func (p *Client) processConnectionPool() {
+	for epoch := uint8(1); !*p.isClosed; epoch++ {
+		timeout := p.serverSettings.GetIdleConnectionTimeout()
 
-	// 0 or less disables the idle timeout
-	if timeout <= 0 {
-		return
-	}
+		// In the _worst case_ scenario (sudden stop of all activity 1ns
+		//  after a cleanup run), the effective idle time for connections is
+		//  `timeout + min(10s, timeout/4) + 1ns`.
+		time.Sleep(minDuration(10*time.Second, timeout/4))
 
-	staleCutOff := time.Now().Add(-timeout)
-	for p.evictStaleConnectionsOnce(staleCutOff) {
-		// Refresh the timeout.
-		timeout = p.serverSettings.GetIdleConnectionTimeout()
-
-		// In the worst case (sudden stop of all activity after a cleanup run),
-		//  the effective idle time for connections is 1.5*timeout.
-		time.Sleep(timeout / 2)
-		staleCutOff = staleCutOff.Add(timeout / 2)
+		p.processConnectionPoolOnce(epoch)
 	}
 }
 
-func (p *Client) evictStaleConnectionsOnce(staleCutOff time.Time) bool {
-	p.isClosedMutex.RLock()
-	defer p.isClosedMutex.RUnlock()
-	if *p.isClosed {
-		return false
-	}
-
-	for conn := range p.freeConns {
-		if conn.idleSince.After(staleCutOff) {
-			// We are past the stale connections. Put the idle connection back.
+func (p *Client) processConnectionPoolOnce(epoch uint8) {
+	for {
+		var conn *transactableConn
+		select {
+		case conn = <-p.freeConns:
+		default:
+			// Empty connection pool.
+			return
+		}
+		if conn.pollEpoch == epoch {
+			// We've seen all the idle connections.
 			p.freeConns <- conn
-			break
+			return
 		}
-		if err := conn.Close(); err != nil {
-			log.Println("error while closing idle connection:", err)
+		conn.pollEpoch = epoch
+		conn.conn.pollBackgroundMessages()
+		if conn.conn.soc.Closed() {
+			p.potentialConns <- struct{}{}
+			continue
 		}
-		p.potentialConns <- struct{}{}
+		// 0 or less disables the idle timeout
+		timeout := p.serverSettings.GetIdleConnectionTimeout()
+		if timeout > 0 && conn.idleSince.Add(timeout).After(time.Now()) {
+			if err := conn.Close(); err != nil {
+				log.Println("error while closing idle connection:", err)
+			}
+			p.potentialConns <- struct{}{}
+			continue
+		}
+		p.freeConns <- conn
 	}
-	return true
 }
 
 func (p *Client) acquire(ctx context.Context) (*transactableConn, error) {
@@ -202,7 +214,7 @@ func (p *Client) acquire(ctx context.Context) (*transactableConn, error) {
 			for i := 0; i < p.concurrency-1; i++ {
 				p.potentialConns <- struct{}{}
 			}
-			go p.evictStaleConnectionsUntilClosed()
+			go p.processConnectionPool()
 
 			p.connectionPoolMutex.Unlock()
 			return conn, nil

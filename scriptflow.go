@@ -64,7 +64,7 @@ func writeHeaders(w *buff.Writer, headers msgHeaders) {
 	}
 }
 
-func (c *protocolConnection) execScriptFlow(r *buff.Reader, q sfQuery) error {
+func (c *protocolConnection) execScriptFlow(q sfQuery) error {
 	w := buff.NewWriter(c.writeMemory[:0])
 	w.BeginMessage(message.ExecuteScript)
 	writeHeaders(w, q.headers)
@@ -78,6 +78,7 @@ func (c *protocolConnection) execScriptFlow(r *buff.Reader, q sfQuery) error {
 	var err error
 	done := buff.NewSignal()
 
+	r := c.r
 	for r.Next(done.Chan) {
 		switch r.MsgType {
 		case message.CommandComplete:
@@ -88,7 +89,7 @@ func (c *protocolConnection) execScriptFlow(r *buff.Reader, q sfQuery) error {
 		case message.ErrorResponse:
 			err = wrapAll(err, decodeErrorResponseMsg(r, q.cmd))
 		default:
-			if e := c.fallThrough(r); e != nil {
+			if e := c.fallThrough(); e != nil {
 				// the connection will not be usable after this x_x
 				return e
 			}

@@ -36,7 +36,7 @@ var (
 	protocolVersion0p13 = internal.ProtocolVersion{Major: 0, Minor: 13}
 )
 
-func (c *protocolConnection) connect(r *buff.Reader, cfg *connConfig) error {
+func (c *protocolConnection) connect(cfg *connConfig) error {
 	w := buff.NewWriter(c.writeMemory[:0])
 	w.BeginMessage(message.ClientHandshake)
 	w.PushUint16(protocolVersionMax.Major)
@@ -58,6 +58,7 @@ func (c *protocolConnection) connect(r *buff.Reader, cfg *connConfig) error {
 	var err error
 	done := buff.NewSignal()
 
+	r := c.r
 	for r.Next(done.Chan) {
 		switch r.MsgType {
 		case message.ServerHandshake:
@@ -103,7 +104,7 @@ func (c *protocolConnection) connect(r *buff.Reader, cfg *connConfig) error {
 				r.PopBytes()
 			}
 
-			if e := c.authenticate(r, cfg); e != nil {
+			if e := c.authenticate(cfg); e != nil {
 				return e
 			}
 
@@ -112,7 +113,7 @@ func (c *protocolConnection) connect(r *buff.Reader, cfg *connConfig) error {
 			err = wrapAll(err, decodeErrorResponseMsg(r, ""))
 			done.Signal()
 		default:
-			if e := c.fallThrough(r); e != nil {
+			if e := c.fallThrough(); e != nil {
 				// the connection will not be usable after this x_x
 				return e
 			}
@@ -135,10 +136,7 @@ func (c *protocolConnection) connect(r *buff.Reader, cfg *connConfig) error {
 	return err
 }
 
-func (c *protocolConnection) authenticate(
-	r *buff.Reader,
-	cfg *connConfig,
-) error {
+func (c *protocolConnection) authenticate(cfg *connConfig) error {
 	client, err := scram.SHA256.NewClient(cfg.user, cfg.password, "")
 	if err != nil {
 		return &authenticationError{msg: err.Error()}
@@ -161,7 +159,7 @@ func (c *protocolConnection) authenticate(
 	}
 
 	done := buff.NewSignal()
-
+	r := c.r
 	for r.Next(done.Chan) {
 		switch r.MsgType {
 		case message.Authentication:
@@ -184,7 +182,7 @@ func (c *protocolConnection) authenticate(
 		case message.ErrorResponse:
 			err = decodeErrorResponseMsg(r, "")
 		default:
-			if e := c.fallThrough(r); e != nil {
+			if e := c.fallThrough(); e != nil {
 				// the connection will not be usable after this x_x
 				return e
 			}
@@ -238,7 +236,7 @@ func (c *protocolConnection) authenticate(
 		case message.ErrorResponse:
 			err = wrapAll(decodeErrorResponseMsg(r, ""))
 		default:
-			if e := c.fallThrough(r); e != nil {
+			if e := c.fallThrough(); e != nil {
 				// the connection will not be usable after this x_x
 				return e
 			}

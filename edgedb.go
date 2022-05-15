@@ -36,10 +36,9 @@ type cacheCollection struct {
 }
 
 type protocolConnection struct {
-	soc                 *autoClosingSocket
-	writeMemory         [1024]byte
-	acquireReaderSignal chan struct{}
-	readerChan          chan *buff.Reader
+	soc         *autoClosingSocket
+	writeMemory [1024]byte
+	r           *buff.Reader
 
 	protocolVersion internal.ProtocolVersion
 	cacheCollection
@@ -63,85 +62,47 @@ func connectWithTimeout(
 		return nil, err
 	}
 
+	toBeDeserialized := make(chan *soc.Data, 2)
 	conn := &protocolConnection{
-		soc:                 socket,
-		acquireReaderSignal: make(chan struct{}, 1),
-		readerChan:          make(chan *buff.Reader, 1),
-		cacheCollection:     caches,
+		soc:             socket,
+		r:               buff.NewReader(toBeDeserialized),
+		cacheCollection: caches,
 	}
 
-	toBeDeserialized := make(chan *soc.Data, 2)
 	go soc.Read(socket, soc.NewMemPool(4, 256*1024), toBeDeserialized)
-	r := buff.NewReader(toBeDeserialized)
 
-	err = conn.connect(r, cfg)
+	err = conn.connect(cfg)
 	if err != nil {
 		_ = socket.Close()
 		return nil, err
 	}
 
-	if err = conn.releaseReader(r); err != nil {
+	if err = conn.resetSocketDeadLine(); err != nil {
 		_ = socket.Close()
 		return nil, err
 	}
 	return conn, nil
 }
 
-func (c *protocolConnection) acquireReader(
-	ctx context.Context,
-) (*buff.Reader, error) {
-	if c.soc.Closed() {
-		return nil, &clientConnectionClosedError{}
-	}
-
-	c.acquireReaderSignal <- struct{}{}
-	select {
-	case r := <-c.readerChan:
-		if r.Err != nil {
-			return nil, &clientConnectionClosedError{err: r.Err}
-		}
-		if c.soc.Closed() {
-			return nil, &clientConnectionClosedError{}
-		}
-		return r, nil
-	case <-ctx.Done():
-		return nil, wrapNetError(ctx.Err())
-	}
+func (c *protocolConnection) resetSocketDeadLine() error {
+	return c.soc.SetDeadline(time.Time{})
 }
 
-func (c *protocolConnection) releaseReader(r *buff.Reader) error {
+func (c *protocolConnection) pollBackgroundMessages() {
 	if c.soc.Closed() {
-		return &clientConnectionClosedError{}
+		return
 	}
-
-	if err := c.soc.SetDeadline(time.Time{}); err != nil {
-		return err
-	}
-
-	go func() {
-		for r.Next(c.acquireReaderSignal) {
-			if e := c.fallThrough(r); e != nil {
-				log.Println(e)
-				_ = c.soc.Close()
-				c.readerChan <- r
-				return
-			}
+	for c.r.Next(nil) {
+		if err := c.fallThrough(); err != nil {
+			log.Println(err)
+			_ = c.soc.Close()
 		}
-
-		c.readerChan <- r
-	}()
-
-	return nil
+	}
 }
 
 // Close the db connection
 func (c *protocolConnection) close() error {
-	_, err := c.acquireReader(context.Background())
-	if err != nil {
-		return err
-	}
-
-	err = c.terminate()
+	err := c.terminate()
 	if err != nil {
 		return err
 	}
@@ -150,34 +111,22 @@ func (c *protocolConnection) close() error {
 }
 
 func (c *protocolConnection) scriptFlow(ctx context.Context, q sfQuery) error {
-	r, err := c.acquireReader(ctx)
-	if err != nil {
-		return err
-	}
-
 	deadline, _ := ctx.Deadline()
-	err = c.soc.SetDeadline(deadline)
+	err := c.soc.SetDeadline(deadline)
 	if err != nil {
 		return err
 	}
-
-	return firstError(c.execScriptFlow(r, q), c.releaseReader(r))
+	return firstError(c.execScriptFlow(q), c.resetSocketDeadLine())
 }
 
 func (c *protocolConnection) granularFlow(
 	ctx context.Context,
 	q *gfQuery,
 ) error {
-	r, err := c.acquireReader(ctx)
-	if err != nil {
-		return err
-	}
-
 	deadline, _ := ctx.Deadline()
-	err = c.soc.SetDeadline(deadline)
+	err := c.soc.SetDeadline(deadline)
 	if err != nil {
 		return err
 	}
-
-	return firstError(c.execGranularFlow(r, q), c.releaseReader(r))
+	return firstError(c.execGranularFlow(q), c.resetSocketDeadLine())
 }

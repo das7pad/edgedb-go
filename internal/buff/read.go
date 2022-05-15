@@ -76,15 +76,29 @@ func (r *Reader) Next(doneReadingSignal chan struct{}) bool {
 	r.MsgType = 0
 
 	if r.data == nil {
-		select {
-		case <-doneReadingSignal:
-			return false
-		case r.data = <-r.toBeDeserialized:
-			if r.data.Err != nil {
-				r.Err = r.data.Err
-				r.data.Release()
-				r.data = nil
+		if doneReadingSignal == nil {
+			select {
+			case r.data = <-r.toBeDeserialized:
+				if r.data.Err != nil {
+					r.Err = r.data.Err
+					r.data.Release()
+					r.data = nil
+					return false
+				}
+			default:
 				return false
+			}
+		} else {
+			select {
+			case <-doneReadingSignal:
+				return false
+			case r.data = <-r.toBeDeserialized:
+				if r.data.Err != nil {
+					r.Err = r.data.Err
+					r.data.Release()
+					r.data = nil
+					return false
+				}
 			}
 		}
 	}

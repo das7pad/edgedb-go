@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/edgedb/edgedb-go/internal/buff"
 	"github.com/edgedb/edgedb-go/internal/message"
 )
 
@@ -31,7 +30,8 @@ var logMsgSeverityLookup = map[uint8]string{
 	0x50: "WARNING",
 }
 
-func (c *protocolConnection) fallThrough(r *buff.Reader) error {
+func (c *protocolConnection) fallThrough() error {
+	r := c.r
 	switch r.MsgType {
 	case message.ParameterStatus:
 		name := r.PopString()

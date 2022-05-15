@@ -32,25 +32,24 @@ import (
 )
 
 func (c *protocolConnection) execGranularFlow(
-	r *buff.Reader,
 	q *gfQuery,
 ) error {
 	ids, ok := c.getCachedTypeIDs(q)
 	if !ok {
-		return c.pesimistic(r, q)
+		return c.pesimistic(q)
 	}
 
 	cdcs, err := c.codecsFromIDs(ids, q)
 	if err != nil {
 		return err
 	} else if cdcs == nil {
-		return c.pesimistic(r, q)
+		return c.pesimistic(q)
 	}
 
 	// When descriptors are returned the codec ids sent didn't match the
 	// server's.  The codecs should be rebuilt with the new descriptors and the
 	// execution retried.
-	descs, err := c.optimistic(r, q, cdcs)
+	descs, err := c.optimistic(q, cdcs)
 	if err != nil {
 		return err
 	} else if descs == nil { // optimistic execute succeeded
@@ -62,16 +61,16 @@ func (c *protocolConnection) execGranularFlow(
 		return err
 	}
 
-	return c.execute(r, q, cdcs)
+	return c.execute(q, cdcs)
 }
 
-func (c *protocolConnection) pesimistic(r *buff.Reader, q *gfQuery) error {
-	err := c.prepare(r, q)
+func (c *protocolConnection) pesimistic(q *gfQuery) error {
+	err := c.prepare(q)
 	if err != nil {
 		return err
 	}
 
-	descs, err := c.describe(r, q)
+	descs, err := c.describe(q)
 	if err != nil {
 		return err
 	}
@@ -81,7 +80,7 @@ func (c *protocolConnection) pesimistic(r *buff.Reader, q *gfQuery) error {
 		return err
 	}
 
-	return c.execute(r, q, cdcs)
+	return c.execute(q, cdcs)
 }
 
 func (c *protocolConnection) codecsFromIDs(
@@ -160,7 +159,7 @@ func (c *protocolConnection) codecsFromDescriptors(
 	return &cdcs, nil
 }
 
-func (c *protocolConnection) prepare(r *buff.Reader, q *gfQuery) error {
+func (c *protocolConnection) prepare(q *gfQuery) error {
 	headers := copyHeaders(q.headers)
 
 	if c.protocolVersion.GTE(protocolVersion0p10) {
@@ -190,6 +189,7 @@ func (c *protocolConnection) prepare(r *buff.Reader, q *gfQuery) error {
 
 	done := buff.NewSignal()
 
+	r := c.r
 	for r.Next(done.Chan) {
 		switch r.MsgType {
 		case message.PrepareComplete:
@@ -202,7 +202,7 @@ func (c *protocolConnection) prepare(r *buff.Reader, q *gfQuery) error {
 		case message.ErrorResponse:
 			err = wrapAll(err, decodeErrorResponseMsg(r, q.cmd))
 		default:
-			if e := c.fallThrough(r); e != nil {
+			if e := c.fallThrough(); e != nil {
 				// the connection will not be usable after this x_x
 				return e
 			}
@@ -219,7 +219,6 @@ func (c *protocolConnection) prepare(r *buff.Reader, q *gfQuery) error {
 }
 
 func (c *protocolConnection) describe(
-	r *buff.Reader,
 	q *gfQuery,
 ) (*descPair, error) {
 	w := buff.NewWriter(c.writeMemory[:0])
@@ -242,17 +241,18 @@ func (c *protocolConnection) describe(
 	)
 	done := buff.NewSignal()
 
+	r := c.r
 	for r.Next(done.Chan) {
 		switch r.MsgType {
 		case message.CommandDataDescription:
-			descs, _, err = c.decodeCommandDataDescriptionMsg(r, q)
+			descs, _, err = c.decodeCommandDataDescriptionMsg(q)
 		case message.ReadyForCommand:
 			decodeReadyForCommandMsg(r)
 			done.Signal()
 		case message.ErrorResponse:
 			err = wrapAll(err, decodeErrorResponseMsg(r, q.cmd))
 		default:
-			if e := c.fallThrough(r); e != nil {
+			if e := c.fallThrough(); e != nil {
 				// the connection will not be usable after this x_x
 				return nil, e
 			}
@@ -267,7 +267,6 @@ func (c *protocolConnection) describe(
 }
 
 func (c *protocolConnection) execute(
-	r *buff.Reader,
 	q *gfQuery,
 	cdcs *codecPair,
 ) error {
@@ -294,6 +293,7 @@ func (c *protocolConnection) execute(
 	}
 	done := buff.NewSignal()
 
+	r := c.r
 	for r.Next(done.Chan) {
 		switch r.MsgType {
 		case message.Data:
@@ -324,7 +324,7 @@ func (c *protocolConnection) execute(
 
 			err = wrapAll(err, decodeErrorResponseMsg(r, q.cmd))
 		default:
-			if e := c.fallThrough(r); e != nil {
+			if e := c.fallThrough(); e != nil {
 				// the connection will not be usable after this x_x
 				return e
 			}
@@ -343,7 +343,6 @@ func (c *protocolConnection) execute(
 }
 
 func (c *protocolConnection) optimistic(
-	r *buff.Reader,
 	q *gfQuery,
 	cdcs *codecPair,
 ) (*descPair, error) {
@@ -381,6 +380,7 @@ func (c *protocolConnection) optimistic(
 	done := buff.NewSignal()
 
 	var descs *descPair
+	r := c.r
 	for r.Next(done.Chan) {
 		switch r.MsgType {
 		case message.Data:
@@ -403,7 +403,7 @@ func (c *protocolConnection) optimistic(
 			decodeCommandCompleteMsg(r)
 		case message.CommandDataDescription:
 			var headers msgHeaders
-			descs, headers, err = c.decodeCommandDataDescriptionMsg(r, q)
+			descs, headers, err = c.decodeCommandDataDescriptionMsg(q)
 			c.cacheCapabilities(q, headers)
 		case message.ReadyForCommand:
 			decodeReadyForCommandMsg(r)
@@ -415,7 +415,7 @@ func (c *protocolConnection) optimistic(
 
 			err = wrapAll(err, decodeErrorResponseMsg(r, q.cmd))
 		default:
-			if e := c.fallThrough(r); e != nil {
+			if e := c.fallThrough(); e != nil {
 				// the connection will not be usable after this x_x
 				return nil, e
 			}
@@ -479,9 +479,9 @@ func decodeDataMsg(
 }
 
 func (c *protocolConnection) decodeCommandDataDescriptionMsg(
-	r *buff.Reader,
 	q *gfQuery,
 ) (*descPair, msgHeaders, error) {
+	r := c.r
 	headers := decodeHeaders(r)
 	card := r.PopUint8()
 
