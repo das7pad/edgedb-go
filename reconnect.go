@@ -35,9 +35,6 @@ type reconnectingConn struct {
 	borrowableConn
 	cacheCollection
 	cfg *connConfig
-
-	// isClosed is true when the connection has been closed by a user.
-	isClosed bool
 }
 
 // reconnect establishes a new connection with the server retrying the
@@ -47,10 +44,6 @@ func (c *reconnectingConn) reconnect(
 	ctx context.Context,
 	single bool,
 ) error {
-	if c.isClosed {
-		return &interfaceError{msg: "Connection is closed"}
-	}
-
 	maxTime := time.Now().Add(c.cfg.waitUntilAvailable)
 	if deadline, ok := ctx.Deadline(); ok && deadline.Before(maxTime) {
 		maxTime = deadline
@@ -79,7 +72,7 @@ func (c *reconnectingConn) reconnect(
 
 // ensureConnection reconnects to the server if not connected.
 func (c *reconnectingConn) ensureConnection(ctx context.Context) error {
-	if c.conn != nil && !c.conn.isClosed() && !c.isClosed {
+	if !c.conn.soc.Closed() {
 		return nil
 	}
 
@@ -107,15 +100,9 @@ func (c *reconnectingConn) granularFlow(
 
 // Close closes the connection. Connections are not usable after they are
 // closed.
-func (c *reconnectingConn) Close() (err error) {
-	if c.isClosed {
-		return &interfaceError{msg: "connection released more than once"}
+func (c *reconnectingConn) Close() error {
+	if !c.conn.soc.Closed() {
+		return c.conn.close()
 	}
-
-	c.isClosed = true
-	if c.conn != nil && !c.conn.isClosed() {
-		err = c.conn.close()
-	}
-
-	return err
+	return nil
 }

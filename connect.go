@@ -71,7 +71,6 @@ func (c *protocolConnection) connect(r *buff.Reader, cfg *connConfig) error {
 			// https://www.edgedb.com/docs/internals/protocol/overview
 			if protocolVersion.LT(protocolVersionMin) ||
 				protocolVersion.GT(protocolVersionMax) {
-				_ = c.soc.Close()
 				msg := fmt.Sprintf(
 					"unsupported protocol version: %v.%v",
 					protocolVersion.Major,
@@ -128,7 +127,6 @@ func (c *protocolConnection) connect(r *buff.Reader, cfg *connConfig) error {
 	if !isTLS &&
 		c.soc.conn.RemoteAddr().Network() != "unix" &&
 		c.protocolVersion.GTE(protocolVersion0p11) {
-		_ = c.soc.Close()
 		return &clientConnectionError{msg: fmt.Sprintf(
 			"server claims to use protocol version %v.%v without using TLS",
 			c.protocolVersion.Major, c.protocolVersion.Minor)}

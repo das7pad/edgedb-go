@@ -59,6 +59,7 @@ func connectWithTimeout(
 	deadline, _ := ctx.Deadline()
 	err = socket.SetDeadline(deadline)
 	if err != nil {
+		_ = socket.Close()
 		return nil, err
 	}
 
@@ -75,15 +76,21 @@ func connectWithTimeout(
 
 	err = conn.connect(r, cfg)
 	if err != nil {
+		_ = socket.Close()
 		return nil, err
 	}
-	return conn, conn.releaseReader(r)
+
+	if err = conn.releaseReader(r); err != nil {
+		_ = socket.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 func (c *protocolConnection) acquireReader(
 	ctx context.Context,
 ) (*buff.Reader, error) {
-	if c.isClosed() {
+	if c.soc.Closed() {
 		return nil, &clientConnectionClosedError{}
 	}
 
@@ -103,7 +110,7 @@ func (c *protocolConnection) acquireReader(
 }
 
 func (c *protocolConnection) releaseReader(r *buff.Reader) error {
-	if c.isClosed() {
+	if c.soc.Closed() {
 		return &clientConnectionClosedError{}
 	}
 
@@ -129,10 +136,6 @@ func (c *protocolConnection) releaseReader(r *buff.Reader) error {
 
 // Close the db connection
 func (c *protocolConnection) close() error {
-	if c.soc == nil {
-		return &interfaceError{msg: "connection closed more than once"}
-	}
-
 	_, err := c.acquireReader(context.Background())
 	if err != nil {
 		return err
@@ -144,14 +147,6 @@ func (c *protocolConnection) close() error {
 	}
 
 	return c.soc.Close()
-}
-
-func (c *protocolConnection) isClosed() bool {
-	if c.soc == nil || c.soc.Closed() {
-		return true
-	}
-
-	return false
 }
 
 func (c *protocolConnection) scriptFlow(ctx context.Context, q sfQuery) error {
