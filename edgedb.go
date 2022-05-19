@@ -18,13 +18,13 @@ package edgedb
 
 import (
 	"context"
-	"log"
+	"errors"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/edgedb/edgedb-go/internal"
 	"github.com/edgedb/edgedb-go/internal/buff"
-	"github.com/edgedb/edgedb-go/internal/soc"
 )
 
 type cacheCollection struct {
@@ -55,50 +55,45 @@ func connectWithTimeout(
 		return nil, err
 	}
 
-	deadline, _ := ctx.Deadline()
-	err = socket.SetDeadline(deadline)
-	if err != nil {
-		_ = socket.Close()
-		return nil, err
-	}
-
-	toBeDeserialized := make(chan *soc.Data, 2)
 	conn := &protocolConnection{
 		soc:             socket,
-		r:               buff.NewReader(toBeDeserialized),
+		r:               buff.NewReader(socket),
 		cacheCollection: caches,
 	}
 
-	go soc.Read(socket, soc.NewMemPool(4, 256*1024), toBeDeserialized)
+	ctx, cancel := conn.handleCtxCancel(ctx)
+	defer cancel()
 
 	err = conn.connect(cfg)
 	if err != nil {
 		_ = socket.Close()
 		return nil, err
 	}
-
-	if err = conn.resetSocketDeadLine(); err != nil {
-		_ = socket.Close()
-		return nil, err
-	}
 	return conn, nil
 }
 
-func (c *protocolConnection) resetSocketDeadLine() error {
-	return c.soc.SetDeadline(time.Time{})
-}
-
-func (c *protocolConnection) pollBackgroundMessages() {
+func (c *protocolConnection) pollBackgroundMessages() error {
 	if c.soc.Closed() {
-		return
+		return nil
 	}
-	waitForMore := false
-	for c.r.Next(&waitForMore) {
+	if err := c.soc.SetDeadline(time.Now().Add(time.Millisecond)); err != nil {
+		return err
+	}
+	for c.r.Next(true) {
 		if err := c.fallThrough(); err != nil {
-			log.Println(err)
 			_ = c.soc.Close()
+			return err
 		}
 	}
+
+	if err := c.r.Err; err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+		return err
+	}
+
+	if err := c.soc.SetDeadline(time.Time{}); err != nil {
+		return err
+	}
+	return nil
 }
 
 // Close the db connection
@@ -112,22 +107,32 @@ func (c *protocolConnection) close() error {
 }
 
 func (c *protocolConnection) scriptFlow(ctx context.Context, q sfQuery) error {
-	deadline, _ := ctx.Deadline()
-	err := c.soc.SetDeadline(deadline)
-	if err != nil {
-		return err
-	}
-	return firstError(c.execScriptFlow(q), c.resetSocketDeadLine())
+	ctx, cancel := c.handleCtxCancel(ctx)
+	defer cancel()
+	return c.execScriptFlow(q)
 }
 
 func (c *protocolConnection) granularFlow(
 	ctx context.Context,
 	q *gfQuery,
 ) error {
-	deadline, _ := ctx.Deadline()
-	err := c.soc.SetDeadline(deadline)
-	if err != nil {
-		return err
+	ctx, cancel := c.handleCtxCancel(ctx)
+	defer cancel()
+	return c.execGranularFlow(q)
+}
+
+func (c *protocolConnection) handleCtxCancel(ctx context.Context) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	aborted := true
+	go func() {
+		<-ctx.Done()
+		if aborted {
+			// Unblock reads and writes.
+			_ = c.soc.Close()
+		}
+	}()
+	return ctx, func() {
+		aborted = false
+		cancel()
 	}
-	return firstError(c.execGranularFlow(q), c.resetSocketDeadLine())
 }

@@ -82,27 +82,17 @@ type queryKey struct {
 	outType reflect.Type
 }
 
-func makeKey(q *gfQuery) queryKey {
-	return queryKey{
-		cmd:     q.cmd,
-		fmt:     q.fmt,
-		expCard: q.expCard,
-		outType: q.outType,
-	}
-}
-
 func (c *protocolConnection) getCachedTypeIDs(q *gfQuery) (*idPair, bool) {
-	if val, ok := c.typeIDCache.Load(makeKey(q)); ok {
-		x := val.(idPair)
-		return &x, true
+	if val, ok := c.typeIDCache.Load(q.queryKey); ok {
+		return val.(*idPair), true
 	}
 
 	return nil, false
 }
 
-func (c *protocolConnection) cacheTypeIDs(q *gfQuery, ids idPair) {
+func (c *protocolConnection) cacheTypeIDs(q *gfQuery, ids *idPair) {
 	// TypeIDs are stable. Only write on cache miss.
-	c.typeIDCache.LoadOrStore(makeKey(q), ids)
+	c.typeIDCache.LoadOrStore(q.queryKey, ids)
 }
 
 func (c *protocolConnection) cacheCapabilities(
@@ -112,12 +102,12 @@ func (c *protocolConnection) cacheCapabilities(
 	if capabilities, ok := headers[header.Capabilities]; ok {
 		x := binary.BigEndian.Uint64(capabilities)
 		// Capabilities are stable per query. Only write on cache miss.
-		c.capabilitiesCache.LoadOrStore(makeKey(q), x)
+		c.capabilitiesCache.LoadOrStore(q.queryKey, x)
 	}
 }
 
 func (c *reconnectingConn) getCachedCapabilities(q *gfQuery) (uint64, bool) {
-	if val, ok := c.capabilitiesCache.Load(makeKey(q)); ok {
+	if val, ok := c.capabilitiesCache.Load(q.queryKey); ok {
 		x := val.(uint64)
 		return x, true
 	}

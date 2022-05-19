@@ -132,7 +132,7 @@ func startServer() {
 		"--port=auto",
 		"--emit-server-status="+statusFileUnix,
 		"--tls-cert-mode=generate_self_signed",
-		"--auto-shutdown-after=0",
+		"--auto-shutdown-after=10",
 		`--bootstrap-command=`+
 			`CREATE SUPERUSER ROLE test { SET password := "shhh" }`,
 	)
@@ -278,7 +278,7 @@ func TestMain(m *testing.M) {
 	// active connections. Start a background go routine that keeps an active
 	// connection to the database while the tests run so that the server
 	// doesn't shutdown.
-	ticker := time.NewTicker(time.Second / 2)
+	ticker := time.NewTicker(time.Second / 4)
 	go func() {
 		// Use a dedicated client/connection pool for all db keepalive activity.
 		// This will allow the tests for connection re-use to see the same
@@ -288,7 +288,10 @@ func TestMain(m *testing.M) {
 			panic(err2)
 		}
 		for range ticker.C {
-			_ = keepAliveClient.Execute(ctx, "SELECT 1;")
+			err2 = keepAliveClient.Execute(ctx, "SELECT 1;")
+			if err2 != nil {
+				panic(err2)
+			}
 		}
 		_ = keepAliveClient.Close()
 	}()

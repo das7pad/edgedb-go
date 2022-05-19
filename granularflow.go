@@ -184,18 +184,18 @@ func (c *protocolConnection) prepare(q *gfQuery) error {
 
 	var (
 		err error
-		ids idPair
+		ids *idPair
 	)
 
 	waitForMore := true
 
 	r := c.r
-	for r.Next(&waitForMore) {
+	for r.Next(waitForMore) {
 		switch r.MsgType {
 		case message.PrepareComplete:
 			c.cacheCapabilities(q, decodeHeaders(r))
 			r.Discard(1) // cardianlity
-			ids = idPair{in: [16]byte(r.PopUUID()), out: [16]byte(r.PopUUID())}
+			ids = &idPair{in: [16]byte(r.PopUUID()), out: [16]byte(r.PopUUID())}
 		case message.ReadyForCommand:
 			decodeReadyForCommandMsg(r)
 			waitForMore = false
@@ -242,7 +242,7 @@ func (c *protocolConnection) describe(
 	waitForMore := true
 
 	r := c.r
-	for r.Next(&waitForMore) {
+	for r.Next(waitForMore) {
 		switch r.MsgType {
 		case message.CommandDataDescription:
 			descs, _, err = c.decodeCommandDataDescriptionMsg(q)
@@ -294,7 +294,7 @@ func (c *protocolConnection) execute(
 	waitForMore := true
 
 	r := c.r
-	for r.Next(&waitForMore) {
+	for r.Next(waitForMore) {
 		switch r.MsgType {
 		case message.Data:
 			val, ok, e := decodeDataMsg(r, q, cdcs)
@@ -381,7 +381,7 @@ func (c *protocolConnection) optimistic(
 
 	var descs *descPair
 	r := c.r
-	for r.Next(&waitForMore) {
+	for r.Next(waitForMore) {
 		switch r.MsgType {
 		case message.Data:
 			val, ok, e := decodeDataMsg(r, q, cdcs)

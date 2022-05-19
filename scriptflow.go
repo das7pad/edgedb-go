@@ -79,7 +79,7 @@ func (c *protocolConnection) execScriptFlow(q sfQuery) error {
 	waitForMore := true
 
 	r := c.r
-	for r.Next(&waitForMore) {
+	for r.Next(waitForMore) {
 		switch r.MsgType {
 		case message.CommandComplete:
 			decodeCommandCompleteMsg(r)

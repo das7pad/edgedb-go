@@ -37,12 +37,9 @@ type msgHeaders map[uint16][]byte
 
 // gfQuery is a granular flow query
 type gfQuery struct {
-	out     reflect.Value
-	outType reflect.Type
-	method  string
-	cmd     string
-	fmt     uint8
-	expCard uint8
+	out    reflect.Value
+	method string
+	queryKey
 	args    []interface{}
 	headers msgHeaders
 }
@@ -77,10 +74,12 @@ func newQuery(
 	}
 
 	q := gfQuery{
-		method:  method,
-		cmd:     cmd,
-		fmt:     frmt,
-		expCard: expCard,
+		method: method,
+		queryKey: queryKey{
+			cmd:     cmd,
+			fmt:     frmt,
+			expCard: expCard,
+		},
 		args:    args,
 		headers: headers,
 	}
@@ -97,7 +96,7 @@ func newQuery(
 	}
 
 	if err != nil {
-		return &gfQuery{}, &interfaceError{err: err}
+		return nil, &interfaceError{err: err}
 	}
 
 	q.outType = q.out.Type()

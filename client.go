@@ -289,7 +289,7 @@ func parseSystemConfig(
 }
 
 func (p *Client) release(conn *transactableConn, err error) error {
-	if isClientConnectionError(err) {
+	if err != nil && isClientConnectionError(err) {
 		p.potentialConns <- struct{}{}
 		return conn.Close()
 	}

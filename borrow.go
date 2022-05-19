@@ -86,8 +86,10 @@ func (c *borrowableConn) assertUnborrowed() error {
 	}
 }
 
+var baseHeaders = msgHeaders{header.AllowCapabilities: noTxCapabilities}
+
 func (c *borrowableConn) headers() msgHeaders {
-	return msgHeaders{header.AllowCapabilities: noTxCapabilities}
+	return baseHeaders
 }
 
 func (c *borrowableConn) scriptFlow(ctx context.Context, q sfQuery) error {

@@ -17,34 +17,91 @@
 package buff
 
 import (
+	"fmt"
+	"io"
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	types "github.com/edgedb/edgedb-go/internal/edgedbtypes"
-	"github.com/edgedb/edgedb-go/internal/soc"
 )
 
-func TestNext(t *testing.T) {
-	toBeDeserialized := make(chan *soc.Data, 1)
-	toBeDeserialized <- &soc.Data{Buf: []byte{0xa, 0, 0, 0, 8, 1, 2, 3, 4}}
-	r := NewReader(toBeDeserialized)
+type stubConn struct {
+	buf []byte
+}
 
-	waitForMore := false
-	assert.True(t, r.Next(&waitForMore))
+func (s *stubConn) Read(p []byte) (n int, err error) {
+	if len(s.buf) == 0 {
+		return 0, io.EOF
+	}
+	n = min(len(s.buf), len(p))
+	copy(p, s.buf[:n])
+	s.buf = s.buf[n:]
+	return n, nil
+}
+
+func TestNext(t *testing.T) {
+	conn := &stubConn{buf: []byte{0xa, 0, 0, 0, 8, 1, 2, 3, 4}}
+	r := NewReader(conn)
+
+	assert.True(t, r.Next(true))
 	assert.Equal(t, uint8(0xa), r.MsgType)
 
 	expected := "cannot finish: unread data in buffer (message type: 0xa)"
-	assert.False(t, r.Next(nil))
+	assert.False(t, r.Next(false))
 	assert.Equal(t, expected, r.Err.Error())
 
 	assert.Equal(t, uint32(0x1020304), r.PopUint32())
 	assert.Panics(t, func() { r.Discard(1) })
 
-	assert.False(t, r.Next(&waitForMore))
+	assert.False(t, r.Next(false))
 	assert.Equal(t, uint8(0), r.MsgType)
 	assert.Panics(t, func() { r.Discard(1) })
+
+	fmt.Println("---")
+	randomBlobSrc := make([]byte, slabSize+50)
+	rand.Read(randomBlobSrc)
+	for i := -50; i < 50; i++ {
+		w := NewWriter(make([]byte, slabSize+100))
+		randomBlob := randomBlobSrc[:slabSize+i]
+		for j := 0; j < 10; j++ {
+			w.PushUint8(0x44)
+			w.PushUint32(4 + 1)
+			w.PushBytes([]byte{byte(i)})
+		}
+		{
+			w.PushUint8(0x44)
+			w.PushUint32(4 + uint32(len(randomBlob)))
+			w.PushBytes(randomBlob)
+		}
+		for j := 10; j < 20; j++ {
+			w.PushUint8(0x44)
+			w.PushUint32(4 + 1)
+			w.PushBytes([]byte{byte(i)})
+		}
+		blob := w.buf
+		conn = &stubConn{buf: blob}
+		r = NewReader(conn)
+		for j := 0; j < 10; j++ {
+			assert.True(t, r.Next(true))
+			assert.NoError(t, r.Err)
+			assert.Equal(t, r.Buf, []byte{byte(i)})
+			r.Discard(1)
+		}
+		assert.True(t, r.Next(true))
+		assert.NoError(t, r.Err)
+		assert.Equal(t, r.Buf, randomBlob)
+		r.Discard(len(randomBlob))
+
+		for j := 10; j < 20; j++ {
+			assert.True(t, r.Next(true))
+			assert.NoError(t, r.Err)
+			assert.Equal(t, r.Buf, []byte{byte(i)})
+			r.Discard(1)
+		}
+	}
 }
 
 func TestDiscard(t *testing.T) {

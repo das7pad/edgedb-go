@@ -19,7 +19,9 @@ package edgedb
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net"
+	"os"
 	"sync"
 	"time"
 )
@@ -126,7 +128,9 @@ func (s *autoClosingSocket) Close() error {
 func (s *autoClosingSocket) Read(p []byte) (int, error) {
 	n, err := s.conn.Read(p)
 	if err != nil {
-		_ = s.Close()
+		if !errors.Is(err, os.ErrDeadlineExceeded) {
+			_ = s.Close()
+		}
 		err = wrapNetError(err)
 	}
 

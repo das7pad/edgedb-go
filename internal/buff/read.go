@@ -19,24 +19,29 @@ package buff
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 
 	types "github.com/edgedb/edgedb-go/internal/edgedbtypes"
-	"github.com/edgedb/edgedb-go/internal/soc"
+)
+
+const (
+	slabSize = 512 * 1024
 )
 
 // Reader is a buffer reader.
 type Reader struct {
-	toBeDeserialized chan *soc.Data
+	conn   io.Reader
+	slab   []byte
+	offset int
 
-	data    *soc.Data
 	Err     error
 	Buf     []byte
 	MsgType uint8
 }
 
 // NewReader returns a new Reader.
-func NewReader(toBeDeserialized chan *soc.Data) *Reader {
-	return &Reader{toBeDeserialized: toBeDeserialized}
+func NewReader(conn io.Reader) *Reader {
+	return &Reader{conn: conn, slab: make([]byte, 0, slabSize)}
 }
 
 // SimpleReader creates a new reader that operates on a single []byte.
@@ -54,8 +59,8 @@ func SimpleReader(buf []byte) *Reader {
 // If the previous message was not fully read Next() panics.
 //
 // Next() panics if called on a reader created with SimpleReader().
-func (r *Reader) Next(waitForMore *bool) bool {
-	if r.toBeDeserialized == nil {
+func (r *Reader) Next(waitForMore bool) bool {
+	if r.conn == nil {
 		panic("called next on a simple reader")
 	}
 
@@ -67,32 +72,10 @@ func (r *Reader) Next(waitForMore *bool) bool {
 		return false
 	}
 
-	if r.data != nil && len(r.data.Buf) == 0 {
-		r.data.Release()
-		r.data = nil
-	}
-
 	r.MsgType = 0
 
-	if r.data == nil {
-		if *waitForMore {
-			// Wait indefinitely.
-			// When reading fails it will unblock us with a `.Err` payload.
-			r.data = <-r.toBeDeserialized
-		} else {
-			// Just consume what has already been read.
-			select {
-			case r.data = <-r.toBeDeserialized:
-			default:
-				return false
-			}
-		}
-		if r.data.Err != nil {
-			r.Err = r.data.Err
-			r.data.Release()
-			r.data = nil
-			return false
-		}
+	if len(r.slab) == 0 && !waitForMore {
+		return false
 	}
 
 	// put message type and length into r.Buf
@@ -122,48 +105,53 @@ func min(x, y int) int {
 }
 
 func (r *Reader) feed(n int) error {
-	if r.data != nil && len(r.data.Buf) == 0 {
-		r.data.Release()
-		r.data = nil
-	}
-
 	if n == 0 {
 		return nil
 	}
 
-	if r.data == nil {
-		r.data = <-r.toBeDeserialized
+	m := min(n, len(r.slab)-r.offset)
+	isOwnSlice := false
+	if n+r.offset > slabSize {
+		r.Buf = make([]byte, n)
+		copy(r.Buf, r.slab[r.offset:r.offset+m])
+		isOwnSlice = true
+	} else {
+		r.Buf = r.slab[r.offset : r.offset+n]
+	}
+	n -= m
+	r.offset += m
 
-		if r.data.Err != nil {
-			e := r.data.Err
-			r.data.Release()
-			r.data = nil
-			return e
+	if n == 0 {
+		if r.offset == len(r.slab) {
+			r.slab = r.slab[:0]
+			r.offset = 0
 		}
+		return nil
 	}
 
-	m := min(n, len(r.data.Buf))
-	r.Buf = r.data.Buf[:m]
-	r.data.Buf = r.data.Buf[m:]
-
-	for len(r.Buf) < n {
-		previous := r.data
-		r.data = <-r.toBeDeserialized
-
-		if r.data.Err != nil {
-			previous.Release()
-			e := r.data.Err
-			r.data.Release()
-			r.data = nil
-			return e
+	for n > 0 {
+		if isOwnSlice && r.offset == len(r.slab) {
+			r.slab = r.slab[:0]
+			r.offset = 0
 		}
-
-		m := min(n-len(r.Buf), len(r.data.Buf))
-		r.Buf = append(r.Buf, r.data.Buf[:m]...)
-		r.data.Buf = r.data.Buf[m:]
-		previous.Release()
+		nn, err := r.conn.Read(r.slab[r.offset:slabSize])
+		if err != nil {
+			return err
+		}
+		r.slab = r.slab[:r.offset+nn]
+		overlap := min(n, nn)
+		if isOwnSlice {
+			copy(r.Buf[m:], r.slab[r.offset:r.offset+overlap])
+			m += overlap
+		}
+		n -= overlap
+		r.offset += overlap
 	}
 
+	if r.offset == len(r.slab) {
+		r.slab = r.slab[:0]
+		r.offset = 0
+	}
 	return nil
 }
 

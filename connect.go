@@ -59,7 +59,7 @@ func (c *protocolConnection) connect(cfg *connConfig) error {
 	waitForMore := true
 
 	r := c.r
-	for r.Next(&waitForMore) {
+	for r.Next(waitForMore) {
 		switch r.MsgType {
 		case message.ServerHandshake:
 			protocolVersion := internal.ProtocolVersion{
@@ -160,7 +160,7 @@ func (c *protocolConnection) authenticate(cfg *connConfig) error {
 
 	waitForMore := true
 	r := c.r
-	for r.Next(&waitForMore) {
+	for r.Next(waitForMore) {
 		switch r.MsgType {
 		case message.Authentication:
 			authStatus := r.PopUint32()
@@ -207,7 +207,7 @@ func (c *protocolConnection) authenticate(cfg *connConfig) error {
 	}
 
 	waitForMore = true
-	for r.Next(&waitForMore) {
+	for r.Next(waitForMore) {
 		switch r.MsgType {
 		case message.Authentication:
 			authStatus := r.PopUint32()
