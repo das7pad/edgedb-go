@@ -150,6 +150,9 @@ func runQuery(
 	}
 
 	err = c.granularFlow(ctx, q)
+	if err == nil {
+		return nil
+	}
 
 	var edbErr Error
 	if errors.As(err, &edbErr) &&

@@ -36,81 +36,22 @@ type transactableConn struct {
 	txOpts    TxOptions
 	retryOpts RetryOptions
 	idleSince time.Time
-	pollEpoch uint8
-}
-
-// Execute an EdgeQL command (or commands).
-func (c *transactableConn) Execute(ctx context.Context, cmd string) error {
-	return c.scriptFlow(ctx, sfQuery{
-		cmd:     cmd,
-		headers: c.headers(),
-	})
-}
-
-// Query runs a query and returns the results.
-func (c *transactableConn) Query(
-	ctx context.Context,
-	cmd string,
-	out interface{},
-	args ...interface{},
-) error {
-	return runQuery(ctx, c, "Query", cmd, out, args)
-}
-
-// QuerySingle runs a singleton-returning query and returns its element.
-// If the query executes successfully but doesn't return a result
-// a NoDataError is returned.
-func (c *transactableConn) QuerySingle(
-	ctx context.Context,
-	cmd string,
-	out interface{},
-	args ...interface{},
-) error {
-	return runQuery(ctx, c, "QuerySingle", cmd, out, args)
-}
-
-// QueryJSON runs a query and return the results as JSON.
-func (c *transactableConn) QueryJSON(
-	ctx context.Context,
-	cmd string,
-	out *[]byte,
-	args ...interface{},
-) error {
-	return runQuery(ctx, c, "QueryJSON", cmd, out, args)
-}
-
-// QuerySingleJSON runs a singleton-returning query.
-// If the query executes successfully but doesn't have a result
-// a NoDataError is returned.
-func (c *transactableConn) QuerySingleJSON(
-	ctx context.Context,
-	cmd string,
-	out interface{},
-	args ...interface{},
-) error {
-	return runQuery(ctx, c, "QuerySingleJSON", cmd, out, args)
+	pollEpoch int64
 }
 
 func (c *transactableConn) granularFlow(
 	ctx context.Context,
 	q *gfQuery,
 ) error {
-	var (
-		err    error
-		edbErr Error
-	)
+	var err error
+	if err = c.reconnectingConn.granularFlow(ctx, q); err == nil {
+		return nil
+	}
 
-	for i := 1; true; i++ {
-		if errors.As(err, &edbErr) && c.conn.soc.Closed() {
-			err = c.reconnect(ctx, true)
-			if err != nil {
-				goto Error
-			}
-		}
-
-		err = c.reconnectingConn.granularFlow(ctx, q)
-
-	Error:
+	var edbErr Error
+	i := 0
+	for {
+		i++
 		// q is a read only query if it has no capabilities
 		// i.e. capabilities == 0. Read only queries are always
 		// retryable, mutation queries are retryable if the
@@ -130,13 +71,20 @@ func (c *transactableConn) granularFlow(
 			}
 
 			time.Sleep(rule.backoff(i))
-			continue
+		} else {
+			return err
 		}
 
-		return err
-	}
+		if c.conn.soc.Closed() {
+			if err = c.reconnect(ctx, true); err != nil {
+				continue
+			}
+		}
 
-	return &clientError{msg: "unreachable"}
+		if err = c.reconnectingConn.granularFlow(ctx, q); err == nil {
+			return nil
+		}
+	}
 }
 
 // Tx runs an action in a transaction retrying failed actions if they might
@@ -153,7 +101,7 @@ func (c *transactableConn) Tx(
 
 	var edbErr Error
 	for i := 1; true; i++ {
-		if errors.As(err, &edbErr) && c.conn.soc.Closed() {
+		if err != nil && errors.As(err, &edbErr) && c.conn.soc.Closed() {
 			err = c.reconnect(ctx, true)
 			if err != nil {
 				goto Error
@@ -163,32 +111,38 @@ func (c *transactableConn) Tx(
 		}
 
 		{
+			cancel := conn.handleCtxCancel(ctx)
 			tx := &Tx{
 				borrowableConn: borrowableConn{conn: conn},
 				txState:        &txState{},
 				options:        c.txOpts,
 			}
-			err = tx.start(ctx)
+			err = tx.start()
 			if err != nil {
+				cancel()
 				goto Error
 			}
 
 			err = action(context.WithValue(ctx, txContextKey{}, tx), tx)
 			if err == nil {
-				err = tx.commit(ctx)
-				if errors.As(err, &edbErr) &&
+				err = tx.commit()
+				cancel()
+				if err != nil && errors.As(err, &edbErr) &&
 					edbErr.Category(TransactionError) &&
 					edbErr.HasTag(ShouldRetry) {
 					goto Error
 				}
 				return err
 			} else if isClientConnectionError(err) {
+				cancel()
 				goto Error
 			}
 
-			if e := tx.rollback(ctx); e != nil && !errors.As(e, &edbErr) {
+			if e := tx.rollback(); e != nil && !errors.As(e, &edbErr) {
+				cancel()
 				return e
 			}
+			cancel()
 		}
 
 	Error:

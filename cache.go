@@ -79,7 +79,7 @@ type queryKey struct {
 	cmd     string
 	fmt     uint8
 	expCard uint8
-	outType reflect.Type
+	outType reflect.Type // nolint:structcheck
 }
 
 func (c *protocolConnection) getCachedTypeIDs(q *gfQuery) (*idPair, bool) {

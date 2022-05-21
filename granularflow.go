@@ -166,7 +166,7 @@ func (c *protocolConnection) prepare(q *gfQuery) error {
 		headers[header.ExplicitObjectIDs] = []byte("true")
 	}
 
-	w := buff.NewWriter(c.writeMemory[:0])
+	w := c.w
 	w.BeginMessage(message.Prepare)
 	writeHeaders(w, headers)
 	w.PushUint8(q.fmt)
@@ -189,13 +189,13 @@ func (c *protocolConnection) prepare(q *gfQuery) error {
 
 	waitForMore := true
 
-	r := c.r
-	for r.Next(waitForMore) {
-		switch r.MsgType {
+	r := c.cr.Reader
+	for c.cr.Next(waitForMore) {
+		switch c.cr.MsgType {
 		case message.PrepareComplete:
 			c.cacheCapabilities(q, decodeHeaders(r))
 			r.Discard(1) // cardianlity
-			ids = &idPair{in: [16]byte(r.PopUUID()), out: [16]byte(r.PopUUID())}
+			ids = &idPair{in: r.PopUUID(), out: r.PopUUID()}
 		case message.ReadyForCommand:
 			decodeReadyForCommandMsg(r)
 			waitForMore = false
@@ -209,8 +209,8 @@ func (c *protocolConnection) prepare(q *gfQuery) error {
 		}
 	}
 
-	if r.Err != nil {
-		return r.Err
+	if err2 := c.cr.Err; err2 != nil {
+		return err2
 	}
 
 	c.cacheTypeIDs(q, ids)
@@ -221,7 +221,7 @@ func (c *protocolConnection) prepare(q *gfQuery) error {
 func (c *protocolConnection) describe(
 	q *gfQuery,
 ) (*descPair, error) {
-	w := buff.NewWriter(c.writeMemory[:0])
+	w := c.w
 	w.BeginMessage(message.DescribeStatement)
 	w.PushUint16(0) // no headers
 	w.PushUint8(aspect.DataDescription)
@@ -241,9 +241,9 @@ func (c *protocolConnection) describe(
 	)
 	waitForMore := true
 
-	r := c.r
-	for r.Next(waitForMore) {
-		switch r.MsgType {
+	r := c.cr.Reader
+	for c.cr.Next(waitForMore) {
+		switch c.cr.MsgType {
 		case message.CommandDataDescription:
 			descs, _, err = c.decodeCommandDataDescriptionMsg(q)
 		case message.ReadyForCommand:
@@ -259,8 +259,8 @@ func (c *protocolConnection) describe(
 		}
 	}
 
-	if r.Err != nil {
-		return nil, r.Err
+	if err2 := c.cr.Err; err2 != nil {
+		return nil, err2
 	}
 
 	return descs, err
@@ -270,11 +270,12 @@ func (c *protocolConnection) execute(
 	q *gfQuery,
 	cdcs *codecPair,
 ) error {
-	w := buff.NewWriter(c.writeMemory[:0])
+	w := c.w
 	w.BeginMessage(message.Execute)
 	writeHeaders(w, q.headers)
 	w.PushUint32(0) // no statement name
 	if e := cdcs.in.Encode(w, q.args, codecs.Path("args"), true); e != nil {
+		w.Abort()
 		return &invalidArgumentError{msg: e.Error()}
 	}
 	w.EndMessage()
@@ -293,9 +294,9 @@ func (c *protocolConnection) execute(
 	}
 	waitForMore := true
 
-	r := c.r
-	for r.Next(waitForMore) {
-		switch r.MsgType {
+	r := c.cr.Reader
+	for c.cr.Next(waitForMore) {
+		switch c.cr.MsgType {
 		case message.Data:
 			val, ok, e := decodeDataMsg(r, q, cdcs)
 			if e != nil {
@@ -331,8 +332,8 @@ func (c *protocolConnection) execute(
 		}
 	}
 
-	if r.Err != nil {
-		return r.Err
+	if err2 := c.cr.Err; err2 != nil {
+		return err2
 	}
 
 	if !q.flat() {
@@ -352,7 +353,7 @@ func (c *protocolConnection) optimistic(
 		headers[header.ExplicitObjectIDs] = []byte("true")
 	}
 
-	w := buff.NewWriter(c.writeMemory[:0])
+	w := c.w
 	w.BeginMessage(message.OptimisticExecute)
 	writeHeaders(w, headers)
 	w.PushUint8(q.fmt)
@@ -361,6 +362,7 @@ func (c *protocolConnection) optimistic(
 	w.PushUUID(cdcs.in.DescriptorID())
 	w.PushUUID(cdcs.out.DescriptorID())
 	if e := cdcs.in.Encode(w, q.args, codecs.Path("args"), true); e != nil {
+		w.Abort()
 		return nil, &invalidArgumentError{msg: e.Error()}
 	}
 	w.EndMessage()
@@ -380,9 +382,9 @@ func (c *protocolConnection) optimistic(
 	waitForMore := true
 
 	var descs *descPair
-	r := c.r
-	for r.Next(waitForMore) {
-		switch r.MsgType {
+	r := c.cr.Reader
+	for c.cr.Next(waitForMore) {
+		switch c.cr.MsgType {
 		case message.Data:
 			val, ok, e := decodeDataMsg(r, q, cdcs)
 			if e != nil {
@@ -422,8 +424,8 @@ func (c *protocolConnection) optimistic(
 		}
 	}
 
-	if r.Err != nil {
-		return nil, r.Err
+	if err2 := c.cr.Err; err2 != nil {
+		return nil, err2
 	}
 
 	if !q.flat() {
@@ -481,7 +483,7 @@ func decodeDataMsg(
 func (c *protocolConnection) decodeCommandDataDescriptionMsg(
 	q *gfQuery,
 ) (*descPair, msgHeaders, error) {
-	r := c.r
+	r := c.cr.Reader
 	headers := decodeHeaders(r)
 	card := r.PopUint8()
 

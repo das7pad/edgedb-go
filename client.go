@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -55,6 +56,8 @@ func minDuration(a, b time.Duration) time.Duration {
 
 // Client is a connection pool and is safe for concurrent use.
 type Client struct {
+	pollEpoch *int64
+
 	isClosed      *bool
 	isClosedMutex *sync.RWMutex // locks isClosed
 
@@ -92,14 +95,16 @@ func CreateClient(ctx context.Context, opts Options) (*Client, error) { // nolin
 //     edgedb://user:password@host:port/database?option=value.
 //
 // The following options are recognized: host, port, user, database, password.
-func CreateClientDSN(ctx context.Context, dsn string, opts Options) (*Client, error) { // nolint:gocritic,lll
+func CreateClientDSN(_ context.Context, dsn string, opts Options) (*Client, error) { // nolint:gocritic,lll
 	cfg, err := parseConnectDSNAndArgs(dsn, &opts, newCfgPaths())
 	if err != nil {
 		return nil, err
 	}
 
 	False := false
+	Zero := int64(0)
 	p := &Client{
+		pollEpoch:           &Zero,
 		isClosed:            &False,
 		isClosedMutex:       &sync.RWMutex{},
 		cfg:                 cfg,
@@ -139,21 +144,25 @@ func (p *Client) newConn(ctx context.Context) (*transactableConn, error) {
 	return &conn, nil
 }
 
-func (p *Client) processConnectionPool() {
-	for epoch := uint8(1); !*p.isClosed; epoch++ {
+func (p *Client) connectionPoolMaintenance() {
+	for !*p.isClosed {
+		// Bump the epoch ahead of sleeping. p.release should use the _next_
+		//  epoch in order for us to skip the connections in the first loop.
+		epoch := atomic.AddInt64(p.pollEpoch, 1)
 		timeout := p.serverSettings.GetIdleConnectionTimeout()
 
 		// In the _worst case_ scenario (sudden stop of all activity 1ns
-		//  after a cleanup run), the effective idle time for connections is
-		//  `timeout + min(10s, timeout/4) + 1ns`.
-		time.Sleep(minDuration(10*time.Second, timeout/4))
+		//  before a cleanup run), the effective idle time for connections is
+		//  `timeout + (min(10s, timeout / 2) - 1ns) + N*1ms`:
+		// Timeout plus one idle cycle plus N times 1ms polling on idle conns.
+		time.Sleep(minDuration(10*time.Second, timeout/2))
 
-		p.processConnectionPoolOnce(epoch)
+		p.processIdleConnections(epoch, timeout)
 	}
 }
 
-func (p *Client) processConnectionPoolOnce(epoch uint8) {
-	for {
+func (p *Client) processIdleConnections(epoch int64, timeout time.Duration) {
+	for i := 0; true; i++ {
 		var conn *transactableConn
 		select {
 		case conn = <-p.freeConns:
@@ -167,13 +176,14 @@ func (p *Client) processConnectionPoolOnce(epoch uint8) {
 			return
 		}
 		conn.pollEpoch = epoch
-		conn.conn.pollBackgroundMessages()
-		if conn.conn.soc.Closed() {
-			p.potentialConns <- struct{}{}
-			continue
+		if err := conn.conn.pollBackgroundMessages(); err != nil {
+			log.Println("error polling idle connection:", err)
+			if conn.conn.soc.Closed() {
+				p.potentialConns <- struct{}{}
+				continue
+			}
 		}
-		// 0 or less disables the idle timeout
-		timeout := p.serverSettings.GetIdleConnectionTimeout()
+		// A timeout of 0 or less disables the idle timeout
 		if timeout > 0 && conn.idleSince.Add(timeout).After(time.Now()) {
 			if err := conn.Close(); err != nil {
 				log.Println("error while closing idle connection:", err)
@@ -214,7 +224,7 @@ func (p *Client) acquire(ctx context.Context) (*transactableConn, error) {
 			for i := 0; i < p.concurrency-1; i++ {
 				p.potentialConns <- struct{}{}
 			}
-			go p.processConnectionPool()
+			go p.connectionPoolMaintenance()
 
 			p.connectionPoolMutex.Unlock()
 			return conn, nil
@@ -294,6 +304,7 @@ func (p *Client) release(conn *transactableConn, err error) error {
 		return conn.Close()
 	}
 	conn.idleSince = time.Now()
+	conn.pollEpoch = atomic.LoadInt64(p.pollEpoch)
 	p.freeConns <- conn
 	return nil
 }
@@ -365,6 +376,7 @@ func (p *Client) Execute(ctx context.Context, cmd string) error {
 		headers: conn.headers(),
 	}
 
+	defer conn.conn.handleCtxCancel(ctx)()
 	err = conn.scriptFlow(ctx, q)
 	return firstError(err, p.release(conn, err))
 }

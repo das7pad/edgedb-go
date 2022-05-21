@@ -18,30 +18,41 @@ package buff
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	types "github.com/edgedb/edgedb-go/internal/edgedbtypes"
 )
 
 const (
-	slabSize = 512 * 1024
+	slabSize = 1024 * 1024
 )
 
 // Reader is a buffer reader.
 type Reader struct {
-	conn   io.Reader
-	slab   []byte
-	offset int
+	Inner *Reader
+	Buf   []byte
+}
 
-	Err     error
-	Buf     []byte
+// ConnReader is consuming socket data into a Reader.
+type ConnReader struct {
+	*Reader
 	MsgType uint8
+	Err     error
+	conn    io.Reader
+	slab    []byte
+	offset  int
 }
 
 // NewReader returns a new Reader.
-func NewReader(conn io.Reader) *Reader {
-	return &Reader{conn: conn, slab: make([]byte, 0, slabSize)}
+func NewReader(conn io.Reader) *ConnReader {
+	return &ConnReader{
+		Reader: &Reader{},
+		conn:   conn,
+		slab:   make([]byte, 0, slabSize),
+	}
 }
 
 // SimpleReader creates a new reader that operates on a single []byte.
@@ -55,15 +66,16 @@ func SimpleReader(buf []byte) *Reader {
 //  and waitForMore is false, or an error is encountered while reading.
 //
 // Callers must continue to call Next until it returns false.
-//
-// If the previous message was not fully read Next() panics.
-//
-// Next() panics if called on a reader created with SimpleReader().
-func (r *Reader) Next(waitForMore bool) bool {
-	if r.conn == nil {
-		panic("called next on a simple reader")
-	}
+func (r *ConnReader) Next(waitForMore bool) bool {
+	return r.next(waitForMore, false)
+}
 
+// Poll is like Next but ignores timeout errors when nothing was read yet.
+func (r *ConnReader) Poll() bool {
+	return r.next(true, true)
+}
+
+func (r *ConnReader) next(waitForMore bool, poll bool) bool {
 	if len(r.Buf) > 0 {
 		r.Err = fmt.Errorf(
 			"cannot finish: unread data in buffer (message type: 0x%x)",
@@ -78,16 +90,23 @@ func (r *Reader) Next(waitForMore bool) bool {
 		return false
 	}
 
+	var partialRead bool
+
 	// put message type and length into r.Buf
-	r.Err = r.feed(5)
+	partialRead, r.Err = r.feed(5)
 	if r.Err != nil {
+		if poll && !partialRead && errors.Is(r.Err, os.ErrDeadlineExceeded) {
+			// We are polling and did not consume anything yet.
+			r.Buf = nil
+			r.Err = nil
+		}
 		return false
 	}
 
 	r.MsgType = r.PopUint8()
 	msgLen := int(r.PopUint32()) - 4
 
-	r.Err = r.feed(msgLen)
+	_, r.Err = r.feed(msgLen)
 	if r.Err != nil {
 		return false
 	}
@@ -104,9 +123,9 @@ func min(x, y int) int {
 	return y
 }
 
-func (r *Reader) feed(n int) error {
+func (r *ConnReader) feed(n int) (bool, error) {
 	if n == 0 {
-		return nil
+		return false, nil
 	}
 
 	m := min(n, len(r.slab)-r.offset)
@@ -126,7 +145,7 @@ func (r *Reader) feed(n int) error {
 			r.slab = r.slab[:0]
 			r.offset = 0
 		}
-		return nil
+		return false, nil
 	}
 
 	for n > 0 {
@@ -135,8 +154,8 @@ func (r *Reader) feed(n int) error {
 			r.offset = 0
 		}
 		nn, err := r.conn.Read(r.slab[r.offset:slabSize])
-		if err != nil {
-			return err
+		if nn < n && err != nil {
+			return nn > 0, err
 		}
 		r.slab = r.slab[:r.offset+nn]
 		overlap := min(n, nn)
@@ -152,7 +171,7 @@ func (r *Reader) feed(n int) error {
 		r.slab = r.slab[:0]
 		r.offset = 0
 	}
-	return nil
+	return false, nil
 }
 
 // Discard skips n bytes.
@@ -169,7 +188,11 @@ func (r *Reader) DiscardMessage() {
 // populated with the first n bytes from the buffer
 // and discards those bytes.
 func (r *Reader) PopSlice(n uint32) *Reader {
-	s := SimpleReader(r.Buf[:n])
+	if r.Inner == nil {
+		r.Inner = &Reader{}
+	}
+	s := r.Inner
+	s.Buf = r.Buf[:n:n]
 	r.Buf = r.Buf[n:]
 	return s
 }

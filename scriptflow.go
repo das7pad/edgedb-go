@@ -65,7 +65,7 @@ func writeHeaders(w *buff.Writer, headers msgHeaders) {
 }
 
 func (c *protocolConnection) execScriptFlow(q sfQuery) error {
-	w := buff.NewWriter(c.writeMemory[:0])
+	w := c.w
 	w.BeginMessage(message.ExecuteScript)
 	writeHeaders(w, q.headers)
 	w.PushString(q.cmd)
@@ -78,9 +78,9 @@ func (c *protocolConnection) execScriptFlow(q sfQuery) error {
 	var err error
 	waitForMore := true
 
-	r := c.r
-	for r.Next(waitForMore) {
-		switch r.MsgType {
+	r := c.cr.Reader
+	for c.cr.Next(waitForMore) {
+		switch c.cr.MsgType {
 		case message.CommandComplete:
 			decodeCommandCompleteMsg(r)
 		case message.ReadyForCommand:
@@ -96,8 +96,8 @@ func (c *protocolConnection) execScriptFlow(q sfQuery) error {
 		}
 	}
 
-	if r.Err != nil {
-		return r.Err
+	if err2 := c.cr.Err; err2 != nil {
+		return err2
 	}
 
 	return err

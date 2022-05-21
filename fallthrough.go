@@ -31,8 +31,8 @@ var logMsgSeverityLookup = map[uint8]string{
 }
 
 func (c *protocolConnection) fallThrough() error {
-	r := c.r
-	switch r.MsgType {
+	r := c.cr.Reader
+	switch c.cr.MsgType {
 	case message.ParameterStatus:
 		name := r.PopString()
 		value := r.PopBytes()
@@ -47,7 +47,7 @@ func (c *protocolConnection) fallThrough() error {
 		ignoreHeaders(r)
 		log.Println("SERVER MESSAGE", severity, code, message)
 	default:
-		msg := fmt.Sprintf("unexpected message type: 0x%x", r.MsgType)
+		msg := fmt.Sprintf("unexpected message type: 0x%x", c.cr.MsgType)
 		return &unexpectedMessageError{msg: msg}
 	}
 

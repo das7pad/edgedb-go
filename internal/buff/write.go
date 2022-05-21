@@ -25,13 +25,22 @@ import (
 // Writer is a write buffer.
 type Writer struct {
 	buf     []byte
+	slab    []byte
 	msgPos  int
 	bytePos []int
 }
 
 // NewWriter returns a new Writer.
-func NewWriter(alocatedMemory []byte) *Writer {
-	return &Writer{buf: alocatedMemory[:0]}
+func NewWriter() *Writer {
+	slab := make([]byte, 0, slabSize)
+	return &Writer{buf: slab, slab: slab}
+}
+
+// Abort resets the Writer after an aborted write session.
+func (w *Writer) Abort() {
+	w.bytePos = w.bytePos[:0]
+	w.buf = w.slab[:0]
+	w.msgPos = 0
 }
 
 // Unwrap returns the underlying []byte.
@@ -45,17 +54,26 @@ func (w *Writer) Unwrap() []byte {
 	}
 
 	buf := w.buf
-	w.buf = nil
+	w.buf = w.slab[:0]
 	return buf
+}
+
+func (w *Writer) makeSpace(n int) {
+	if m := len(w.buf) + n; m > slabSize {
+		// Copy into a new larger slice
+		w.buf = append(make([]byte, 0, m), w.buf...)
+	}
 }
 
 // PushUint8 writes a uint8 to the buffer.
 func (w *Writer) PushUint8(val uint8) {
+	w.makeSpace(1)
 	w.buf = append(w.buf, val)
 }
 
 // PushUint16 writes a uint16 to the buffer.
 func (w *Writer) PushUint16(val uint16) {
+	w.makeSpace(2)
 	n := len(w.buf)
 	w.buf = append(w.buf, 0, 0)
 	binary.BigEndian.PutUint16(w.buf[n:n+2], val)
@@ -63,6 +81,7 @@ func (w *Writer) PushUint16(val uint16) {
 
 // PushUint32 writes a uint32 to the buffer.
 func (w *Writer) PushUint32(val uint32) {
+	w.makeSpace(4)
 	n := len(w.buf)
 	w.buf = append(w.buf, 0, 0, 0, 0)
 	binary.BigEndian.PutUint32(w.buf[n:n+4], val)
@@ -70,6 +89,7 @@ func (w *Writer) PushUint32(val uint32) {
 
 // PushUint64 writes a uint64 to the buffer.
 func (w *Writer) PushUint64(val uint64) {
+	w.makeSpace(8)
 	n := len(w.buf)
 	w.buf = append(w.buf, 0, 0, 0, 0, 0, 0, 0, 0)
 	binary.BigEndian.PutUint64(w.buf[n:n+8], val)
@@ -77,18 +97,20 @@ func (w *Writer) PushUint64(val uint64) {
 
 // PushUUID writes a types.UUID to the buffer.
 func (w *Writer) PushUUID(val types.UUID) {
+	w.makeSpace(16)
 	w.buf = append(w.buf, val[:]...)
 }
 
 // PushBytes writes []byte to the buffer.
 func (w *Writer) PushBytes(val []byte) {
+	w.makeSpace(len(w.buf))
 	w.buf = append(w.buf, val...)
 }
 
 // PushString writes a string to the buffer.
 func (w *Writer) PushString(val string) {
 	w.PushUint32(uint32(len(val)))
-	w.PushBytes([]byte(val))
+	w.buf = append(w.buf, val...)
 }
 
 // BeginBytes allocates space for `data_length` in the buffer.
@@ -101,6 +123,7 @@ func (w *Writer) BeginBytes() {
 		panic("cannot begin bytes: no current message")
 	}
 
+	w.makeSpace(4)
 	n := len(w.buf)
 	w.buf = append(w.buf, 0, 0, 0, 0)
 	w.bytePos = append(w.bytePos, n)
@@ -131,6 +154,7 @@ func (w *Writer) BeginMessage(mType uint8) {
 		panic("cannot begin message: the previous message is not finished")
 	}
 
+	w.makeSpace(5)
 	w.msgPos = 1 + len(w.buf)
 	w.buf = append(w.buf, mType, 0, 0, 0, 0)
 }

@@ -92,12 +92,12 @@ func (c *borrowableConn) headers() msgHeaders {
 	return baseHeaders
 }
 
-func (c *borrowableConn) scriptFlow(ctx context.Context, q sfQuery) error {
+func (c *borrowableConn) scriptFlow(q sfQuery) error {
 	if e := c.assertUnborrowed(); e != nil {
 		return e
 	}
 
-	return c.conn.scriptFlow(ctx, q)
+	return c.conn.scriptFlow(q)
 }
 
 func (c *borrowableConn) granularFlow(ctx context.Context, q *gfQuery) error {

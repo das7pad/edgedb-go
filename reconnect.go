@@ -47,26 +47,33 @@ func (c *reconnectingConn) reconnect(
 	maxTime := time.Now().Add(c.cfg.waitUntilAvailable)
 	if deadline, ok := ctx.Deadline(); ok && deadline.Before(maxTime) {
 		maxTime = deadline
+	} else {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, maxTime)
+		defer cancel()
 	}
 
-	var edbErr Error
 	for {
 		conn, err := connectWithTimeout(ctx, c.cfg, c.cacheCollection)
 		if err == nil {
 			c.conn = conn
 			return nil
 		}
+		var edbErr Error
 		if single ||
 			errors.Is(err, context.Canceled) ||
 			errors.Is(err, context.DeadlineExceeded) ||
 			!errors.As(err, &edbErr) ||
 			!edbErr.Category(ClientConnectionError) ||
-			!edbErr.HasTag(ShouldReconnect) ||
-			time.Now().After(maxTime) {
+			!edbErr.HasTag(ShouldReconnect) {
 			return err
 		}
 
-		time.Sleep(time.Duration(10+rand.Int63n(200)) * time.Millisecond)
+		backOff := time.Duration(10+rand.Int63n(200)) * time.Millisecond
+		if time.Now().Add(backOff).After(maxTime) {
+			return err
+		}
+		time.Sleep(backOff)
 	}
 }
 
@@ -84,7 +91,7 @@ func (c *reconnectingConn) scriptFlow(ctx context.Context, q sfQuery) error {
 		return e
 	}
 
-	return c.borrowableConn.scriptFlow(ctx, q)
+	return c.borrowableConn.scriptFlow(q)
 }
 
 func (c *reconnectingConn) granularFlow(

@@ -53,16 +53,17 @@ func runSubtx(
 		options:        c.txOptions(),
 	}
 
-	if e := subtx.declare(ctx); e != nil {
+	defer conn.handleCtxCancel(ctx)()
+	if e := subtx.declare(); e != nil {
 		return e
 	}
 
 	subTxCtx := context.WithValue(ctx, subTxContextKey{}, subtx)
 	if e := action(subTxCtx, subtx); e != nil {
-		return firstError(subtx.rollback(ctx), e)
+		return firstError(subtx.rollback(), e)
 	}
 
-	return subtx.release(ctx)
+	return subtx.release()
 }
 
 // SubtxBlock is work to be done in a subtransaction.
@@ -77,32 +78,32 @@ type Subtx struct {
 	name    string
 }
 
-func (t *Subtx) declare(ctx context.Context) error {
+func (t *Subtx) declare() error {
 	if e := t.assertStarted("start subtransaction"); e != nil {
 		return e
 	}
 
 	t.name = t.nextSavepointName()
 	cmd := "DECLARE SAVEPOINT " + t.name
-	return t.scriptFlow(ctx, sfQuery{cmd: cmd})
+	return t.scriptFlow(sfQuery{cmd: cmd})
 }
 
-func (t *Subtx) release(ctx context.Context) error {
+func (t *Subtx) release() error {
 	if e := t.assertStarted("release subtransaction"); e != nil {
 		return e
 	}
 
 	cmd := "RELEASE SAVEPOINT " + t.name
-	return t.scriptFlow(ctx, sfQuery{cmd: cmd})
+	return t.scriptFlow(sfQuery{cmd: cmd})
 }
 
-func (t *Subtx) rollback(ctx context.Context) error {
+func (t *Subtx) rollback() error {
 	if e := t.assertStarted("rollback subtransaction"); e != nil {
 		return e
 	}
 
 	cmd := "ROLLBACK TO SAVEPOINT " + t.name
-	return t.scriptFlow(ctx, sfQuery{cmd: cmd})
+	return t.scriptFlow(sfQuery{cmd: cmd})
 }
 
 func (t *Subtx) txOptions() TxOptions { return t.options }
@@ -122,7 +123,8 @@ func (t *Subtx) Execute(ctx context.Context, cmd string) error {
 		return e
 	}
 
-	return t.scriptFlow(ctx, sfQuery{
+	defer t.conn.handleCtxCancel(ctx)()
+	return t.scriptFlow(sfQuery{
 		cmd:     cmd,
 		headers: t.headers(),
 	})

@@ -87,11 +87,10 @@ type Tx struct {
 }
 
 func (t *Tx) execute(
-	ctx context.Context,
 	cmd string,
 	sucessState txStatus,
 ) error {
-	err := t.borrowableConn.scriptFlow(ctx, sfQuery{cmd: cmd})
+	err := t.borrowableConn.scriptFlow(sfQuery{cmd: cmd})
 
 	switch err {
 	case nil:
@@ -103,7 +102,7 @@ func (t *Tx) execute(
 	return err
 }
 
-func (t *Tx) start(ctx context.Context) error {
+func (t *Tx) start() error {
 	if e := t.assertNotDone("start"); e != nil {
 		return e
 	}
@@ -115,23 +114,23 @@ func (t *Tx) start(ctx context.Context) error {
 	}
 
 	query := t.options.startTxQuery()
-	return t.execute(ctx, query, startedTx)
+	return t.execute(query, startedTx)
 }
 
-func (t *Tx) commit(ctx context.Context) error {
+func (t *Tx) commit() error {
 	if e := t.assertStarted("commit"); e != nil {
 		return e
 	}
 
-	return t.execute(ctx, "COMMIT;", committedTx)
+	return t.execute("COMMIT;", committedTx)
 }
 
-func (t *Tx) rollback(ctx context.Context) error {
+func (t *Tx) rollback() error {
 	if e := t.assertStarted("rollback"); e != nil {
 		return e
 	}
 
-	return t.execute(ctx, "ROLLBACK;", rolledBackTx)
+	return t.execute("ROLLBACK;", rolledBackTx)
 }
 
 func (t *Tx) txOptions() TxOptions { return t.options }
@@ -145,12 +144,12 @@ func (t *Tx) Subtx(ctx context.Context, action SubtxBlock) error {
 	return runSubtx(ctx, action, t)
 }
 
-func (t *Tx) scriptFlow(ctx context.Context, q sfQuery) error {
+func (t *Tx) scriptFlow(q sfQuery) error {
 	if e := t.assertStarted("Execute"); e != nil {
 		return e
 	}
 
-	return t.borrowableConn.scriptFlow(ctx, q)
+	return t.borrowableConn.scriptFlow(q)
 }
 
 func (t *Tx) granularFlow(ctx context.Context, q *gfQuery) error {
@@ -163,7 +162,8 @@ func (t *Tx) granularFlow(ctx context.Context, q *gfQuery) error {
 
 // Execute an EdgeQL command (or commands).
 func (t *Tx) Execute(ctx context.Context, cmd string) error {
-	return t.scriptFlow(ctx, sfQuery{
+	defer t.conn.handleCtxCancel(ctx)()
+	return t.scriptFlow(sfQuery{
 		cmd:     cmd,
 		headers: t.headers(),
 	})

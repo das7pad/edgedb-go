@@ -18,8 +18,6 @@ package edgedb
 
 import (
 	"context"
-	"errors"
-	"os"
 	"sync"
 	"time"
 
@@ -36,9 +34,9 @@ type cacheCollection struct {
 }
 
 type protocolConnection struct {
-	soc         *autoClosingSocket
-	writeMemory [1024]byte
-	r           *buff.Reader
+	soc *autoClosingSocket
+	cr  *buff.ConnReader
+	w   *buff.Writer
 
 	protocolVersion internal.ProtocolVersion
 	cacheCollection
@@ -57,12 +55,12 @@ func connectWithTimeout(
 
 	conn := &protocolConnection{
 		soc:             socket,
-		r:               buff.NewReader(socket),
+		cr:              buff.NewReader(socket),
+		w:               buff.NewWriter(),
 		cacheCollection: caches,
 	}
 
-	ctx, cancel := conn.handleCtxCancel(ctx)
-	defer cancel()
+	defer conn.handleCtxCancel(ctx)()
 
 	err = conn.connect(cfg)
 	if err != nil {
@@ -79,14 +77,14 @@ func (c *protocolConnection) pollBackgroundMessages() error {
 	if err := c.soc.SetDeadline(time.Now().Add(time.Millisecond)); err != nil {
 		return err
 	}
-	for c.r.Next(true) {
+	for c.cr.Poll() {
 		if err := c.fallThrough(); err != nil {
 			_ = c.soc.Close()
 			return err
 		}
 	}
 
-	if err := c.r.Err; err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+	if err := c.cr.Err; err != nil {
 		return err
 	}
 
@@ -106,9 +104,7 @@ func (c *protocolConnection) close() error {
 	return c.soc.Close()
 }
 
-func (c *protocolConnection) scriptFlow(ctx context.Context, q sfQuery) error {
-	ctx, cancel := c.handleCtxCancel(ctx)
-	defer cancel()
+func (c *protocolConnection) scriptFlow(q sfQuery) error {
 	return c.execScriptFlow(q)
 }
 
@@ -116,22 +112,21 @@ func (c *protocolConnection) granularFlow(
 	ctx context.Context,
 	q *gfQuery,
 ) error {
-	ctx, cancel := c.handleCtxCancel(ctx)
-	defer cancel()
+	defer c.handleCtxCancel(ctx)()
 	return c.execGranularFlow(q)
 }
 
-func (c *protocolConnection) handleCtxCancel(ctx context.Context) (context.Context, func()) {
-	ctx, cancel := context.WithCancel(ctx)
+func (c *protocolConnection) handleCtxCancel(ctx context.Context) func() {
+	waitForDefer, cancel := context.WithCancel(ctx)
 	aborted := true
 	go func() {
-		<-ctx.Done()
+		<-waitForDefer.Done()
 		if aborted {
 			// Unblock reads and writes.
 			_ = c.soc.Close()
 		}
 	}()
-	return ctx, func() {
+	return func() {
 		aborted = false
 		cancel()
 	}

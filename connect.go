@@ -23,7 +23,6 @@ import (
 	"github.com/xdg/scram"
 
 	"github.com/edgedb/edgedb-go/internal"
-	"github.com/edgedb/edgedb-go/internal/buff"
 	"github.com/edgedb/edgedb-go/internal/message"
 )
 
@@ -37,7 +36,7 @@ var (
 )
 
 func (c *protocolConnection) connect(cfg *connConfig) error {
-	w := buff.NewWriter(c.writeMemory[:0])
+	w := c.w
 	w.BeginMessage(message.ClientHandshake)
 	w.PushUint16(protocolVersionMax.Major)
 	w.PushUint16(protocolVersionMax.Minor)
@@ -58,9 +57,9 @@ func (c *protocolConnection) connect(cfg *connConfig) error {
 	var err error
 	waitForMore := true
 
-	r := c.r
-	for r.Next(waitForMore) {
-		switch r.MsgType {
+	r := c.cr.Reader
+	for c.cr.Next(waitForMore) {
+		switch c.cr.MsgType {
 		case message.ServerHandshake:
 			protocolVersion := internal.ProtocolVersion{
 				Major: r.PopUint16(),
@@ -120,8 +119,8 @@ func (c *protocolConnection) connect(cfg *connConfig) error {
 		}
 	}
 
-	if r.Err != nil {
-		return r.Err
+	if err2 := c.cr.Err; err2 != nil {
+		return err2
 	}
 
 	_, isTLS := c.soc.conn.(*tls.Conn)
@@ -148,7 +147,7 @@ func (c *protocolConnection) authenticate(cfg *connConfig) error {
 		return &authenticationError{msg: err.Error()}
 	}
 
-	w := buff.NewWriter(c.writeMemory[:0])
+	w := c.w
 	w.BeginMessage(message.AuthenticationSASLInitialResponse)
 	w.PushString("SCRAM-SHA-256")
 	w.PushString(scramMsg)
@@ -159,9 +158,9 @@ func (c *protocolConnection) authenticate(cfg *connConfig) error {
 	}
 
 	waitForMore := true
-	r := c.r
-	for r.Next(waitForMore) {
-		switch r.MsgType {
+	r := c.cr.Reader
+	for c.cr.Next(waitForMore) {
+		switch c.cr.MsgType {
 		case message.Authentication:
 			authStatus := r.PopUint32()
 			if authStatus != 0xb {
@@ -189,15 +188,14 @@ func (c *protocolConnection) authenticate(cfg *connConfig) error {
 		}
 	}
 
-	if r.Err != nil {
-		return r.Err
+	if err2 := c.cr.Err; err2 != nil {
+		return err2
 	}
 
 	if err != nil {
 		return err
 	}
 
-	w = buff.NewWriter(c.writeMemory[:0])
 	w.BeginMessage(message.AuthenticationSASLResponse)
 	w.PushString(scramMsg)
 	w.EndMessage()
@@ -207,8 +205,8 @@ func (c *protocolConnection) authenticate(cfg *connConfig) error {
 	}
 
 	waitForMore = true
-	for r.Next(waitForMore) {
-		switch r.MsgType {
+	for c.cr.Next(waitForMore) {
+		switch c.cr.MsgType {
 		case message.Authentication:
 			authStatus := r.PopUint32()
 			switch authStatus {
@@ -242,15 +240,15 @@ func (c *protocolConnection) authenticate(cfg *connConfig) error {
 		}
 	}
 
-	if r.Err != nil {
-		return r.Err
+	if err2 := c.cr.Err; err2 != nil {
+		return err2
 	}
 
 	return err
 }
 
 func (c *protocolConnection) terminate() error {
-	w := buff.NewWriter(c.writeMemory[:0])
+	w := c.w
 	w.BeginMessage(message.Terminate)
 	w.EndMessage()
 	return c.soc.WriteAll(w.Unwrap())

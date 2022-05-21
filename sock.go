@@ -30,8 +30,8 @@ func connectAutoClosingSocket(
 	ctx context.Context,
 	cfg *connConfig,
 ) (*autoClosingSocket, error) {
-	var cancel context.CancelFunc
 	if cfg.connectTimeout > 0 {
+		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, cfg.connectTimeout)
 		defer cancel()
 	}

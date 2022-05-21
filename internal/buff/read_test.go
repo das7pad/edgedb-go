@@ -64,7 +64,7 @@ func TestNext(t *testing.T) {
 	randomBlobSrc := make([]byte, slabSize+50)
 	rand.Read(randomBlobSrc)
 	for i := -50; i < 50; i++ {
-		w := NewWriter(make([]byte, slabSize+100))
+		w := NewWriter()
 		randomBlob := randomBlobSrc[:slabSize+i]
 		for j := 0; j < 10; j++ {
 			w.PushUint8(0x44)

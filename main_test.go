@@ -42,6 +42,7 @@ var (
 	opts            Options
 	client          *Client
 	protocolVersion internal.ProtocolVersion
+	ticker          *time.Ticker
 )
 
 func executeOrPanic(command string) {
@@ -278,9 +279,9 @@ func TestMain(m *testing.M) {
 	// active connections. Start a background go routine that keeps an active
 	// connection to the database while the tests run so that the server
 	// doesn't shutdown.
-	ticker := time.NewTicker(time.Second / 4)
+	ticker = time.NewTicker(time.Second / 4)
 	go func() {
-		// Use a dedicated client/connection pool for all db keepalive activity.
+		// Use a dedicated client/connection pool for db keepalive activity.
 		// This will allow the tests for connection re-use to see the same
 		//  connection(s) from the main connection pool.
 		keepAliveClient, err2 := CreateClient(ctx, opts)

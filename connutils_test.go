@@ -683,7 +683,7 @@ func TestConnectRefused(t *testing.T) {
 	p, err := CreateClient(ctx, Options{
 		Host:               "localhost",
 		Port:               23456,
-		WaitUntilAvailable: 1 * time.Nanosecond,
+		WaitUntilAvailable: 1 * time.Second,
 	})
 
 	if p != nil {
@@ -708,7 +708,7 @@ func TestConnectInvalidName(t *testing.T) {
 	p, err := CreateClient(ctx, Options{
 		Host:               "invalid.example.org",
 		Port:               23456,
-		WaitUntilAvailable: 1 * time.Nanosecond,
+		WaitUntilAvailable: 1 * time.Second,
 	})
 
 	if p != nil {
@@ -740,7 +740,7 @@ func TestConnectRefusedUnixSocket(t *testing.T) {
 	ctx := context.Background()
 	p, err := CreateClient(ctx, Options{
 		Host:               "/tmp/non-existent",
-		WaitUntilAvailable: 1 * time.Nanosecond,
+		WaitUntilAvailable: 1 * time.Second,
 	})
 
 	if p != nil {
